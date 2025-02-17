@@ -1,3 +1,5 @@
+const speakeasy = require('speakeasy');
+const QRCode = require('qrcode');
 const express = require('express');
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
@@ -11,7 +13,13 @@ const port = 3001;
 
 // Configuració de SQLite
 const dbPath = path.resolve(__dirname, 'database.db');
-const db = new sqlite3.Database(dbPath);
+const db = new sqlite3.Database(dbPath, (err) => {
+  if (err) {
+    console.error('Error al conectar con la base de datos:', err.message);
+  } else {
+    console.log('Conectado a la base de datos SQLite');
+  }
+});
 
 // Configuració de Express
 app.use(bodyParser.urlencoded({ extended: true })); // Per processar les dades del formulari
@@ -27,32 +35,7 @@ app.use(helmet());
 
 // Ruta principal
 app.get('/', (req, res) => {
-  if (req.session.user) {
-    // Si l'usuari ha iniciat sessió, mostra la pàgina principal
-    res.sendFile(path.join(__dirname, '/views/index.html'));
-  } else {
-    // Si l'usuari no ha iniciat sessió, redirigeix al formulari d'inici de sessió
-    res.redirect('/login');
-  }
-});
-
-// Ruta per afegir tasques
-app.post('/addTask', async (req, res) => {
-  if (req.session.user) {
-    const task = req.body.task;
-
-    try {
-      // Usar consulta parametritzada per prevenir injeccions SQL
-      await db.run('INSERT INTO tasks (task, user_id) VALUES (?, ?)', [task, req.session.user.id]);
-      console.log(`Tarea añadida: ${task}`);
-      res.redirect('/');
-    } catch (err) {
-      console.error(err.message);
-      res.status(500).send('Error al agregar la tarea');
-    }
-  } else {
-    res.redirect('/login');
-  }
+  res.redirect('/register');
 });
 
 // Ruta per mostrar el formulari de registre
@@ -63,15 +46,32 @@ app.get('/register', (req, res) => {
 // Ruta per processar el formulari de registre
 app.post('/register', async (req, res) => {
   const { username, password } = req.body;
+  console.log('Intentant registrar usuari:', username);
 
   try {
-    // Hashear la contrasenya utilitzant argon2
     const hashedPassword = await argon2.hash(password);
+    const twoFactorSecret = speakeasy.generateSecret({ length: 20 });
 
-    await db.run('INSERT INTO users (username, password) VALUES (?, ?)', [username, hashedPassword]);
-    res.redirect('/login');
+    db.run('INSERT INTO users (username, password, two_factor_secret) VALUES (?, ?, ?)', 
+           [username, hashedPassword, twoFactorSecret.base32], (err) => {
+      if (err) {
+        console.error('Error al registrar el usuario:', err.message);
+        res.status(500).send('Error al registrar el usuario');
+      } else {
+        // Generar un QR code per a l'usuari
+        QRCode.toDataURL(twoFactorSecret.otpauth_url, (err, qrCodeUrl) => {
+          if (err) {
+            console.error('Error al generar el codi QR:', err);
+            res.status(500).send('Error al generar el codi QR');
+          } else {
+            console.log("Escaneja aquest codi QR amb la teva aplicació d'autenticació:", qrCodeUrl);
+            res.send(`<html><body><h1>Escanea este código QR con tu aplicación de autenticación</h1><img src="${qrCodeUrl}"><br><a href="/login">Iniciar sesión</a></body></html>`);
+          }
+        });
+      }
+    });
   } catch (err) {
-    console.error(err);
+    console.error('Error al registrar el usuario:', err);
     res.status(500).send('Error al registrar el usuario');
   }
 });
@@ -82,49 +82,49 @@ app.get('/login', (req, res) => {
 });
 
 // Ruta per processar l'inici de sessió
-app.post('/login', async (req, res) => {
-  const { username, password } = req.body;
+app.post('/login', (req, res) => {
+  const { username, password, twoFactorCode } = req.body;
+  console.log('Intentant iniciar sessió per a l\'usuari:', username);
 
-  try {
-    // Consulta SQL per obtenir l'usuari pel nom d'usuari
-    db.get('SELECT * FROM users WHERE username = ?', [username], async (err, user) => {
-      if (err) {
-        console.error(err);
-        return res.status(500).send('Error al procesar la solicitud');
-      }
+  db.get('SELECT * FROM users WHERE username = ?', [username], async (err, user) => {
+    if (err) {
+      console.error('Error al procesar la solicitud:', err);
+      return res.status(500).send('Error al procesar la solicitud');
+    }
 
-      // Verificar si l'usuari existeix
-      if (!user) {
-        return res.status(401).send('Usuari no trobat');
-      }
+    if (!user) {
+      console.log('Usuari no trobat:', username);
+      return res.status(401).send('Usuari no trobat');
+    }
 
-      // Depuració: imprimeix el hash recuperat de la base de dades
-      console.log('Contrasenya recuperada de la base de dades:', user.password);
-      console.log('Contrasenya ingressada:', password);
+    try {
+      const validPassword = await argon2.verify(user.password, password);
 
-      try {
-        // Verificar si la contrasenya coincideix amb el hash emmagatzemat a la base de dades
-        const validPassword = await argon2.verify(user.password, password);
-        console.log('Contrasenya vàlida:', validPassword); // Verifica si és true
+      if (validPassword) {
+        // Verificar el código 2FA
+        const verified = speakeasy.totp.verify({
+          secret: user.two_factor_secret,
+          encoding: 'base32',
+          token: twoFactorCode,
+        });
 
-        if (validPassword) {
-          // Si l'inici de sessió és correcte, establir la sessió
+        if (verified) {
+          console.log('Codi 2FA verificat correctament per a l\'usuari:', username);
           req.session.user = { id: user.id, username: user.username };
-
-          // Redirigir l'usuari a la pàgina principal
           res.redirect('/');
         } else {
-          res.status(401).send('Contrasenya incorrecta');
+          console.log('Codi 2FA incorrecte per a l\'usuari:', username);
+          res.status(401).send('Codi 2FA incorrecte');
         }
-      } catch (err) {
-        console.error(err);
-        res.status(500).send('Error al verificar la contrasenya');
+      } else {
+        console.log('Contrasenya incorrecta per a l\'usuari:', username);
+        res.status(401).send('Contrasenya incorrecta');
       }
-    });
-  } catch (err) {
-    console.error(err);
-    res.status(500).send('Error al processar l\'inici de sessió');
-  }
+    } catch (err) {
+      console.error('Error al processar l\'inici de sessió:', err);
+      res.status(500).send('Error al processar l\'inici de sessió');
+    }
+  });
 });
 
 // Inicialització del servidor
