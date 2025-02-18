@@ -33,6 +33,9 @@ app.use(session({
 // Configurar Helmet per millorar la seguretat
 app.use(helmet());
 
+// Servir archivos estáticos desde la carpeta "public"
+app.use(express.static(path.join(__dirname, 'public')));
+
 // Ruta principal
 app.get('/', (req, res) => {
   res.redirect('/register');
@@ -102,6 +105,9 @@ app.post('/login', (req, res) => {
 
       if (validPassword) {
         // Verificar el código 2FA
+        console.log('Secreto 2FA:', user.two_factor_secret);
+        console.log('Código 2FA ingresado:', twoFactorCode);
+
         const verified = speakeasy.totp.verify({
           secret: user.two_factor_secret,
           encoding: 'base32',
