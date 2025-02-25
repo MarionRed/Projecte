@@ -9,6 +9,7 @@ const argon2 = require("argon2");
 const helmet = require("helmet");
 const jwt = require("jsonwebtoken");
 const cookieParser = require("cookie-parser");
+const svgCaptcha = require("svg-captcha");
 
 const app = express();
 const port = 3001;
@@ -75,10 +76,22 @@ app.use("/public", express.static(path.join(__dirname, "public")));
 app.use("/app", verifyToken, serveHtml);
 app.use("/auth", redirectIfAuthenticated, serveHtml);
 
+app.get("/captcha", (req, res) => {
+  const captcha = svgCaptcha.create(); // Genera un captcha
+  req.session.captcha = captcha.text; // Guarda el texto del captcha en la sesión
+  res.type("svg");
+  res.status(200).send(captcha.data); // Envia el SVG al cliente
+});
+
 // Ruta per processar el formulari de registre
 app.post("/register", async (req, res) => {
-  const { username, password } = req.body;
+  const { username, password, captcha } = req.body;
   console.log("Intentant registrar usuari:", username);
+
+  // Validar el captcha
+  if (captcha !== req.session.captcha) {
+    return res.status(400).send("Captcha incorrecto. Inténtalo de nuevo.");
+  }
 
   try {
     const hashedPassword = await argon2.hash(password);
@@ -118,8 +131,31 @@ app.post("/register", async (req, res) => {
 
 // Ruta per processar l'inici de sessió
 app.post("/login", (req, res) => {
-  const { username, password, twoFactorCode } = req.body;
+  const { username, password, twoFactorCode, captcha } = req.body;
   console.log("Intentant iniciar sessió per a l'usuari:", username);
+
+  // Validar el captcha
+  if (captcha !== req.session.captcha) {
+    return res.status(400).send("Captcha incorrecto. Inténtalo de nuevo.");
+  }
+
+  // Inicializar intentos fallidos en la sesión si no existen
+  if (!req.session.loginAttempts) {
+    req.session.loginAttempts = 0;
+    req.session.blockUntil = null;
+  }
+
+  // Verificar si el usuario está bloqueado
+  if (req.session.blockUntil && Date.now() < req.session.blockUntil) {
+    const remainingTime = Math.ceil(
+      (req.session.blockUntil - Date.now()) / 1000
+    );
+    return res
+      .status(403)
+      .send(
+        `Has superado el número máximo de intentos. Intenta nuevamente en ${remainingTime} segundos.`
+      );
+  }
 
   db.get(
     "SELECT * FROM users WHERE username = ?",
@@ -162,6 +198,12 @@ app.post("/login", (req, res) => {
           "Codi 2FA verificat correctament per a l'usuari:",
           username
         );
+
+        // Restablecer intentos fallidos al iniciar sesión correctamente
+        req.session.loginAttempts = 0;
+        req.session.blockUntil = null;
+
+        // Generar token JWT y redirigir al usuario a la página de inicio
         req.session.user = { id: user.id, username: user.username };
         res.cookie("token", jwt.sign({ id: user.id }, jwtSecret));
         res.redirect("/app/index");
@@ -171,6 +213,12 @@ app.post("/login", (req, res) => {
       }
     }
   );
+
+  // Bloquear al usuario si supera los intentos permitidos
+  if (req.session.loginAttempts >= 3) {
+    req.session.blockUntil = Date.now() + 30 * 60 * 1000; // Bloquear por 30 minutos
+    return res.redirect("/auth/blocked"); // Redirigir a una página de bloqueo
+  }
 });
 
 app.get("/", (req, res) => res.redirect("/auth/login"));
