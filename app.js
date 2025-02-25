@@ -130,33 +130,17 @@ app.post("/register", async (req, res) => {
 });
 
 // Ruta per processar l'inici de sessió
-app.post("/login", (req, res) => {
+app.post("/login", async (req, res) => {
   const { username, password, twoFactorCode, captcha } = req.body;
   console.log("Intentant iniciar sessió per a l'usuari:", username);
 
   // Validar el captcha
   if (captcha !== req.session.captcha) {
+    console.log("Captcha incorrecto para el usuario:", username);
     return res.status(400).send("Captcha incorrecto. Inténtalo de nuevo.");
   }
 
-  // Inicializar intentos fallidos en la sesión si no existen
-  if (!req.session.loginAttempts) {
-    req.session.loginAttempts = 0;
-    req.session.blockUntil = null;
-  }
-
-  // Verificar si el usuario está bloqueado
-  if (req.session.blockUntil && Date.now() < req.session.blockUntil) {
-    const remainingTime = Math.ceil(
-      (req.session.blockUntil - Date.now()) / 1000
-    );
-    return res
-      .status(403)
-      .send(
-        `Has superado el número máximo de intentos. Intenta nuevamente en ${remainingTime} segundos.`
-      );
-  }
-
+  // Buscar al usuario en la base de datos
   db.get(
     "SELECT * FROM users WHERE username = ?",
     [username],
@@ -167,16 +151,59 @@ app.post("/login", (req, res) => {
       }
 
       if (!user) {
-        console.log("Usuari no trobat:", username);
-        return res.status(401).send("Usuari no trobat");
+        console.log("Usuario no encontrado:", username);
+        return res.status(401).send("Usuario no encontrado");
+      }
+
+      // Verificar si el usuario está bloqueado
+      const currentTime = Date.now();
+      if (user.block_until && currentTime < user.block_until) {
+        const remainingTime = Math.ceil(
+          (user.block_until - currentTime) / 1000
+        );
+        console.log(
+          `Usuario ${username} bloqueado. Tiempo restante: ${remainingTime} segundos.`
+        );
+        return res
+          .status(403)
+          .send(
+            `Has superado el número máximo de intentos. Intenta nuevamente en ${remainingTime} segundos.`
+          );
       }
 
       try {
+        // Verificar la contraseña
         const validPassword = await argon2.verify(user.password, password);
 
         if (!validPassword) {
-          console.log("Contrasenya incorrecta per a l'usuari:", username);
-          return res.status(401).send("Contrasenya incorrecta");
+          console.log("Contraseña incorrecta para el usuario:", username);
+
+          // Incrementar los intentos fallidos
+          const failedAttempts = user.failed_attempts + 1;
+          let blockUntil = null;
+
+          if (failedAttempts >= 3) {
+            blockUntil = Date.now() + 30 * 1000; // Bloquear por 30 segundos
+            console.log(`Usuario ${username} bloqueado por 30 segundos.`);
+          }
+
+          // Actualizar intentos fallidos y tiempo de bloqueo en la base de datos
+          db.run(
+            "UPDATE users SET failed_attempts = ?, block_until = ? WHERE username = ?",
+            [failedAttempts, blockUntil, username],
+            (updateErr) => {
+              if (updateErr) {
+                console.error(
+                  "Error al actualizar los intentos fallidos:",
+                  updateErr
+                );
+              }
+            }
+          );
+
+          return res
+            .status(401)
+            .send("Contraseña incorrecta. Inténtalo de nuevo.");
         }
 
         // Verificar el código 2FA
@@ -190,35 +217,40 @@ app.post("/login", (req, res) => {
         });
 
         if (!verified) {
-          console.log("Codi 2FA incorrecte per a l'usuari:", username);
-          return res.status(401).send("Codi 2FA incorrecte");
+          console.log("Código 2FA incorrecto para el usuario:", username);
+          return res.status(401).send("Código 2FA incorrecto.");
         }
 
         console.log(
-          "Codi 2FA verificat correctament per a l'usuari:",
+          "Código 2FA verificado correctamente para el usuario:",
           username
         );
 
         // Restablecer intentos fallidos al iniciar sesión correctamente
-        req.session.loginAttempts = 0;
-        req.session.blockUntil = null;
+        db.run(
+          "UPDATE users SET failed_attempts = 0, block_until = NULL WHERE username = ?",
+          [username],
+          (updateErr) => {
+            if (updateErr) {
+              console.error(
+                "Error al restablecer los intentos fallidos:",
+                updateErr
+              );
+            }
+          }
+        );
 
-        // Generar token JWT y redirigir al usuario a la página de inicio
+        // Generar token JWT y redirigir al usuario a la página principal
         req.session.user = { id: user.id, username: user.username };
         res.cookie("token", jwt.sign({ id: user.id }, jwtSecret));
+        console.log(`Inicio de sesión exitoso para el usuario: ${username}`);
         res.redirect("/app/index");
       } catch (err) {
-        console.error("Error al processar l'inici de sessió:", err);
-        res.status(500).send("Error al processar l'inici de sessió");
+        console.error("Error al procesar el inicio de sesión:", err);
+        res.status(500).send("Error al procesar el inicio de sesión.");
       }
     }
   );
-
-  // Bloquear al usuario si supera los intentos permitidos
-  if (req.session.loginAttempts >= 3) {
-    req.session.blockUntil = Date.now() + 30 * 60 * 1000; // Bloquear por 30 minutos
-    return res.redirect("/auth/blocked"); // Redirigir a una página de bloqueo
-  }
 });
 
 app.get("/", (req, res) => res.redirect("/auth/login"));
