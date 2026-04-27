@@ -7,6 +7,8 @@
     "dev:backend": "node backend/src/server.js",
     "dev:frontend": "vite --host 0.0.0.0 --config frontend/vite.config.js",
     "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "build:frontend": "vite build --config frontend/vite.config.js",
+    "build": "npm run build:frontend",
     "legacy:start": "node legacy/old-express/app.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },

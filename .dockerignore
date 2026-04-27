@@ -1,0 +1,14 @@
+.git
+.env
+.env.*
+!.env.example
+node_modules
+npm-debug.log*
+Dockerfile
+.dockerignore
+frontend/dist
+backend/iam.sqlite
+*.sqlite
+*.sqlite-journal
+.resources
+legacy/old-express/database.db

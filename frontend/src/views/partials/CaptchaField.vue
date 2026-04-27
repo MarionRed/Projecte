@@ -27,7 +27,8 @@ const props = defineProps({
 defineEmits(["update:modelValue"]);
 
 const nonce = ref(Date.now());
-const captchaUrl = computed(() => `http://localhost:3001/api/auth/captcha?${nonce.value}`);
+const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "/api";
+const captchaUrl = computed(() => `${apiBaseUrl}/auth/captcha?${nonce.value}`);
 
 function reload() {
   nonce.value = Date.now();

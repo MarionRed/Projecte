@@ -36,6 +36,24 @@ npm run dev:frontend
 
 `node app.js` y `npm start` arrancan el backend nuevo, no la version antigua.
 
+## Docker
+
+La imagen Docker sirve el frontend compilado desde el backend Express. Construye la imagen:
+
+```bash
+docker build -t projecte-iam .
+```
+
+Arranca la aplicacion con datos persistentes:
+
+```bash
+docker run --rm -p 3001:3001 -v projecte-iam-data:/data projecte-iam
+```
+
+URL:
+
+- Aplicacion: http://localhost:3001
+
 ## Usuario Demo
 
 - Usuario: `admin`

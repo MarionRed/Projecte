@@ -3,6 +3,7 @@ const cors = require("cors");
 const cookieParser = require("cookie-parser");
 const session = require("express-session");
 const helmet = require("helmet");
+const path = require("path");
 
 require("dotenv").config();
 
@@ -17,12 +18,12 @@ const appResourceRoutes = require("./routes/appResources.routes");
 const app = express();
 
 app.use(helmet());
-app.use(
-  cors({
+if (process.env.CORS_ORIGIN) {
+  app.use(cors({
     origin: process.env.CORS_ORIGIN,
     credentials: true,
-  }),
-);
+  }));
+}
 app.use(express.json({ limit: "1mb" }));
 app.use(cookieParser());
 app.use(
@@ -42,6 +43,17 @@ app.use("/api/resources", resourceRoutes);
 app.use("/api/app/resources", appResourceRoutes);
 app.use("/api/permissions", permissionRoutes);
 app.use("/api/logs", logRoutes);
+
+const frontendDistPath = path.resolve(__dirname, "../../frontend/dist");
+
+app.use(express.static(frontendDistPath));
+app.get("*", (req, res, next) => {
+  if (req.path.startsWith("/api/")) {
+    return next();
+  }
+
+  return res.sendFile(path.join(frontendDistPath, "index.html"));
+});
 
 app.use((err, req, res, next) => {
   console.error(err);
