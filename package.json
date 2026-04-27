@@ -1,9 +1,13 @@
 {
   "name": "projecte",
   "version": "1.0.0",
-  "main": "app.js",
+  "main": "backend/src/server.js",
   "scripts": {
-    "start": "node app.js",
+    "start": "node backend/src/server.js",
+    "dev:backend": "node backend/src/server.js",
+    "dev:frontend": "vite --host 0.0.0.0 --config frontend/vite.config.js",
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "legacy:start": "node legacy/old-express/app.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -12,18 +16,29 @@
   "type": "commonjs",
   "description": "",
   "dependencies": {
+    "@vitejs/plugin-vue": "^5.2.1",
     "argon2": "^0.41.1",
+    "axios": "^1.7.9",
     "bcrypt": "^5.1.1",
     "body-parser": "^1.20.3",
+    "bulma": "^1.0.4",
+    "concurrently": "^9.1.2",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
+    "dotenv": "^17.4.2",
     "express": "^4.21.2",
     "express-session": "^1.18.1",
     "helmet": "^8.0.0",
     "jsonwebtoken": "^9.0.2",
+    "pinia": "^2.3.1",
     "qrcode": "^1.5.4",
+    "sequelize": "^6.37.5",
     "speakeasy": "^2.0.0",
     "sqlite3": "^5.1.7",
-    "svg-captcha": "^1.4.0"
+    "svg-captcha": "^1.4.0",
+    "vite": "^6.0.7",
+    "vue": "^3.5.13",
+    "vue-router": "^4.5.0",
+    "zod": "^3.24.1"
   }
 }

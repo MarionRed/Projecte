@@ -1,4 +1,9 @@
 node_modules/
 database.db
+backend/iam.sqlite
+frontend/dist/
+legacy/old-express/database.db
 .env
 .DS_Store
+
+.resources
