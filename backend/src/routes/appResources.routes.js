@@ -4,11 +4,11 @@ const { authenticate } = require("../middleware/auth");
 const { logEvent } = require("../models");
 const {
   RESOURCE_ROOT,
-  listResources,
-  readResource,
-  createResource,
-  updateResource,
-  deleteResource,
+  createDiskResource,
+  readResourceFile,
+  removeDiskResource,
+  scanDiskResources,
+  writeResourceFile,
 } = require("../services/localResources");
 
 const router = express.Router();
@@ -66,7 +66,13 @@ router.get("/", async (req, res, next) => {
   }
 
   try {
-    const files = await listResources();
+    const files = (await scanDiskResources())
+      .filter((item) => item.kind === "file" && item.path.split("/").length === 2)
+      .map((item) => ({
+        filename: item.name,
+        size: item.size,
+        modifiedAt: item.modifiedAt,
+      }));
     return res.json({ root: RESOURCE_ROOT, files });
   } catch (err) {
     return next(err);
@@ -83,7 +89,7 @@ router.get("/:filename", async (req, res, next) => {
       return denyResourceAccess(req, res, "READ", filename);
     }
 
-    const content = await readResource(filename);
+    const content = await readResourceFile(`/${filename}`);
     await logEvent(req.user.username, "RESOURCE_READ", "SUCCESS", filename);
     return res.json({ filename, content });
   } catch (err) {
@@ -105,7 +111,7 @@ router.post("/", async (req, res, next) => {
     const parsedFilename = parseBodyFilename(req);
     const content = parseContent(req);
 
-    await createResource(parsedFilename, content);
+    await createDiskResource(`/${parsedFilename}`, "file", content);
     await logEvent(req.user.username, "RESOURCE_CREATE", "SUCCESS", parsedFilename);
     return res.status(201).json({ message: "Archivo creado" });
   } catch (err) {
@@ -125,7 +131,7 @@ router.put("/:filename", async (req, res, next) => {
     }
 
     const content = parseContent(req);
-    await updateResource(filename, content);
+    await writeResourceFile(`/${filename}`, content);
     await logEvent(req.user.username, "RESOURCE_UPDATE", "SUCCESS", filename);
     return res.json({ message: "Archivo actualizado" });
   } catch (err) {
@@ -146,7 +152,7 @@ router.delete("/:filename", async (req, res, next) => {
       return denyResourceAccess(req, res, "DELETE", filename);
     }
 
-    await deleteResource(filename);
+    await removeDiskResource(`/${filename}`);
     await logEvent(req.user.username, "RESOURCE_DELETE", "SUCCESS", filename);
     return res.status(204).send();
   } catch (err) {

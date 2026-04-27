@@ -54,30 +54,29 @@ TWO_FACTOR_ENABLED=true
 - Registro de usuarios.
 - Roles `user`, `security` y `admin`.
 - Gestion de usuarios y grupos.
-- Recursos tipo Linux, por ejemplo `/home/clase/apuntes/tema1.txt`.
-- Gestion de archivos reales dentro de `C:\AccessGuard\resources`.
+- Explorador unificado de recursos reales y persistidos bajo `RESOURCE_ROOT`.
 - Permisos `read` y `write` por usuario o grupo.
 - Simulador de acceso permitido/denegado.
 - Logs de auditoria.
 - SQLite con Sequelize.
 
-La primera fase aplica permisos IAM guardados en base de datos. La siguiente fase conectara esos permisos con una VM Linux mediante un adaptador controlado.
+La aplicacion usa los permisos IAM guardados en base de datos para gobernar recursos persistidos. Las operaciones creadas desde la interfaz se aplican en disco y SQLite como una sola unidad logica, con compensacion para restaurar el fichero o directorio si falla la persistencia.
 
-## Archivos Locales
+## Recursos Locales
 
-La pestaña `Archivos reales` trabaja solo dentro de:
+La pestaña `Recursos` trabaja solo dentro de la ruta configurada por `RESOURCE_ROOT`:
 
 ```txt
-C:\AccessGuard\resources
+RESOURCE_ROOT=./.resources
 ```
 
 Permisos:
 
-- `admin`: crear, leer, editar y borrar.
-- `security`: leer.
-- `user`: acceso denegado.
+- `admin`: acceso completo.
+- `security`: puede operar desde la interfaz, pero las acciones sobre recursos concretos se validan contra permisos IAM.
+- `user`: puede acceder cuando tenga permisos directos o heredados por grupo.
 
-El backend rechaza rutas absolutas, rutas con `..` y cualquier intento de salir del directorio permitido.
+El backend rechaza rutas absolutas, rutas con `..` y cualquier intento de salir del directorio permitido. Si hay cambios externos en la carpeta, usa `Sincronizar` para reconciliar disco y SQLite.
 
 ## Integracion Linux VM
 

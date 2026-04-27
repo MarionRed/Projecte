@@ -3,57 +3,26 @@ const { authenticate, requireRole } = require("../middleware/auth");
 const { validate } = require("../middleware/validate");
 const { permissionSchema, accessCheckSchema, idParam } = require("../validators/schemas");
 const { User, Group, Resource, Permission, logEvent } = require("../models");
+const { explainAccess } = require("../services/accessControl");
+const { getPermissionIdentity } = require("../services/resourceManager");
 
 const router = express.Router();
 
 router.use(authenticate);
-
-async function explainAccess(userId, resourceId, action) {
-  const user = await User.findByPk(userId, {
-    include: [{ model: Group, attributes: ["id", "name"], through: { attributes: [] } }],
-  });
-  const resource = await Resource.findByPk(resourceId);
-
-  if (!user || !resource) {
-    return { allowed: false, reason: "Usuario o recurso no encontrado" };
-  }
-
-  if (user.role === "admin") {
-    return { allowed: true, reason: "El rol admin tiene acceso completo" };
-  }
-
-  if (resource.ownerUserId === user.id) {
-    return { allowed: true, reason: "El usuario es propietario del recurso" };
-  }
-
-  const requiredField = action === "read" ? "canRead" : "canWrite";
-  const userPermission = await Permission.findOne({
-    where: { identityType: "user", identityId: user.id, resourceId: resource.id },
-  });
-
-  if (userPermission?.[requiredField]) {
-    return { allowed: true, reason: `Permiso directo de usuario para ${action}` };
-  }
-
-  const groupIds = user.Groups.map((group) => group.id);
-  const groupPermission = await Permission.findOne({
-    where: { identityType: "group", identityId: groupIds, resourceId: resource.id },
-  });
-
-  if (groupPermission?.[requiredField]) {
-    const group = user.Groups.find((item) => item.id === groupPermission.identityId);
-    return { allowed: true, reason: `Permiso heredado del grupo ${group?.name || groupPermission.identityId}` };
-  }
-
-  return { allowed: false, reason: `No existe permiso ${action} para este usuario ni sus grupos` };
-}
 
 router.get("/", async (req, res) => {
   const permissions = await Permission.findAll({
     include: [{ model: Resource }],
     order: [["id", "ASC"]],
   });
-  res.json({ permissions });
+  const enriched = await Promise.all(
+    permissions.map(async (permission) => {
+      const plain = permission.toJSON();
+      plain.identity = await getPermissionIdentity(permission);
+      return plain;
+    }),
+  );
+  res.json({ permissions: enriched });
 });
 
 router.post("/", requireRole(["admin", "security"]), validate(permissionSchema), async (req, res) => {

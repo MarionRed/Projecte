@@ -46,13 +46,26 @@ const membershipSchema = z.object({
 const resourceSchema = z.object({
   body: z.object({
     name: z.string().min(1).max(120),
-    path: z.string().min(1).startsWith("/"),
     kind: z.enum(["directory", "file"]),
+    content: z.string().max(1024 * 1024).optional().default(""),
     fileType: z.string().max(80).optional().nullable(),
-    checksum: z.string().max(120).optional().nullable(),
     parentId: z.number().int().positive().optional().nullable(),
     ownerUserId: z.number().int().positive().optional().nullable(),
     ownerGroupId: z.number().int().positive().optional().nullable(),
+  }),
+});
+
+const resourceUpdateSchema = z.object({
+  params: idParam.shape.params,
+  body: z.object({
+    name: z.string().min(1).max(120),
+  }),
+});
+
+const resourceContentSchema = z.object({
+  params: idParam.shape.params,
+  body: z.object({
+    content: z.string().max(1024 * 1024).default(""),
   }),
 });
 
@@ -82,6 +95,8 @@ module.exports = {
   groupSchema,
   membershipSchema,
   resourceSchema,
+  resourceUpdateSchema,
+  resourceContentSchema,
   permissionSchema,
   accessCheckSchema,
 };

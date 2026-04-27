@@ -27,43 +27,21 @@
         <section v-if="activeTab === 'overview'" class="panel-box">
           <h1 class="title is-3">Panel IAM</h1>
           <div class="columns">
-            <div class="column">
-              <div class="notification is-primary is-light">
-                <p class="heading">Usuarios</p>
-                <p class="title is-4">{{ users.length }}</p>
-              </div>
-            </div>
-            <div class="column">
-              <div class="notification is-link is-light">
-                <p class="heading">Grupos</p>
-                <p class="title is-4">{{ groups.length }}</p>
-              </div>
-            </div>
-            <div class="column">
-              <div class="notification is-success is-light">
-                <p class="heading">Recursos</p>
-                <p class="title is-4">{{ resources.length }}</p>
-              </div>
-            </div>
-            <div class="column">
-              <div class="notification is-warning is-light">
-                <p class="heading">Permisos</p>
-                <p class="title is-4">{{ permissions.length }}</p>
-              </div>
-            </div>
+            <div class="column"><div class="notification is-primary is-light"><p class="heading">Usuarios</p><p class="title is-4">{{ users.length }}</p></div></div>
+            <div class="column"><div class="notification is-link is-light"><p class="heading">Grupos</p><p class="title is-4">{{ groups.length }}</p></div></div>
+            <div class="column"><div class="notification is-success is-light"><p class="heading">Recursos</p><p class="title is-4">{{ persistedResources.length }}</p></div></div>
+            <div class="column"><div class="notification is-warning is-light"><p class="heading">Permisos</p><p class="title is-4">{{ permissions.length }}</p></div></div>
           </div>
           <p>
-            Gestiona identidades, grupos y permisos sobre recursos tipo
-            <code>/home/clase</code>, registrando cada decision de acceso.
+            Gestiona identidades, grupos y permisos sobre la estructura real de
+            <code>{{ resourceRoot }}</code>.
           </p>
         </section>
 
         <section v-if="activeTab === 'users'" class="panel-box">
           <h2 class="title is-4">Usuarios</h2>
           <table class="table is-fullwidth is-striped">
-            <thead>
-              <tr><th>ID</th><th>Usuario</th><th>Rol</th><th>Estado</th><th>Grupos</th><th></th></tr>
-            </thead>
+            <thead><tr><th>ID</th><th>Usuario</th><th>Rol</th><th>Estado</th><th>Grupos</th><th></th></tr></thead>
             <tbody>
               <tr v-for="user in users" :key="user.id">
                 <td>{{ user.id }}</td>
@@ -77,16 +55,9 @@
                     </select>
                   </div>
                 </td>
-                <td>
-                  <label class="checkbox">
-                    <input v-model="user.isActive" type="checkbox" @change="updateUser(user)" />
-                    Activa
-                  </label>
-                </td>
+                <td><label class="checkbox"><input v-model="user.isActive" type="checkbox" @change="updateUser(user)" /> Activa</label></td>
                 <td>{{ (user.Groups || []).map((group) => group.name).join(", ") || "-" }}</td>
-                <td>
-                  <button class="button is-small is-danger is-light" @click="deleteUser(user)">Borrar</button>
-                </td>
+                <td><button class="button is-small is-danger is-light" @click="deleteUser(user)">Borrar</button></td>
               </tr>
             </tbody>
           </table>
@@ -134,147 +105,133 @@
         </section>
 
         <section v-if="activeTab === 'resources'" class="panel-box">
-          <h2 class="title is-4">Recursos</h2>
-          <form class="columns is-multiline" @submit.prevent="createResource">
-            <div class="column is-3"><input v-model="resourceForm.name" class="input" placeholder="nombre" required /></div>
-            <div class="column is-4"><input v-model="resourceForm.path" class="input" placeholder="/home/clase/archivo.txt" required /></div>
-            <div class="column is-2">
-              <div class="select is-fullwidth">
-                <select v-model="resourceForm.kind">
-                  <option value="directory">directorio</option>
-                  <option value="file">archivo</option>
-                </select>
-              </div>
-            </div>
-            <div class="column is-2"><input v-model="resourceForm.checksum" class="input" placeholder="checksum" /></div>
-            <div class="column is-narrow"><button class="button is-primary">Crear</button></div>
-          </form>
-
-          <table class="table is-fullwidth is-striped">
-            <thead><tr><th>Ruta</th><th>Tipo</th><th>Propietario</th><th>Checksum</th><th>chmod conceptual</th></tr></thead>
-            <tbody>
-              <tr v-for="resource in resources" :key="resource.id">
-                <td class="resource-path">{{ resource.path }}</td>
-                <td>{{ resource.kind }}</td>
-                <td>{{ resource.ownerUser?.username || resource.ownerGroup?.name || "-" }}</td>
-                <td>{{ resource.checksum || "-" }}</td>
-                <td><code>{{ chmodFor(resource) }}</code></td>
-              </tr>
-            </tbody>
-          </table>
-        </section>
-
-        <section v-if="activeTab === 'local-files'" class="panel-box">
           <div class="is-flex is-align-items-center is-justify-content-space-between mb-4">
             <div>
-              <h2 class="title is-4 mb-1">Archivos reales</h2>
-              <p class="is-size-7 has-text-grey">C:\AccessGuard\resources</p>
+              <h2 class="title is-4 mb-1">Recursos</h2>
+              <p class="is-size-7 has-text-grey">{{ resourceRoot }}</p>
             </div>
-            <button class="button is-light" @click="loadLocalFiles">Actualizar</button>
-          </div>
-
-          <div v-if="auth.user.role === 'admin'" class="columns">
-            <div class="column is-4">
-              <input v-model="localFileForm.filename" class="input" placeholder="nuevo.txt" />
-            </div>
-            <div class="column">
-              <button class="button is-primary" @click="createLocalFile">Crear archivo</button>
+            <div class="buttons">
+              <button class="button is-light" @click="syncResources">Sincronizar</button>
+              <button class="button is-light" @click="loadAll">Actualizar</button>
             </div>
           </div>
 
           <div class="columns">
             <div class="column is-4">
-              <table class="table is-fullwidth is-striped">
-                <thead>
-                  <tr><th>Archivo</th><th>Tamano</th><th></th></tr>
-                </thead>
-                <tbody>
-                  <tr v-for="file in localFiles" :key="file.filename">
-                    <td class="resource-path">{{ file.filename }}</td>
-                    <td>{{ file.size }} B</td>
-                    <td>
-                      <button class="button is-small is-link is-light" @click="openLocalFile(file.filename)">Abrir</button>
-                    </td>
-                  </tr>
-                  <tr v-if="localFiles.length === 0">
-                    <td colspan="3">No hay archivos.</td>
-                  </tr>
-                </tbody>
-              </table>
+              <form class="resource-create-box mb-4" @submit.prevent="createResource">
+                <div class="field">
+                  <label class="label">Crear en</label>
+                  <input class="input" :value="createLocationLabel" readonly />
+                </div>
+                <div class="field">
+                  <input v-model="resourceForm.name" class="input" placeholder="nombre" required />
+                </div>
+                <div class="field has-addons">
+                  <p class="control is-expanded">
+                    <span class="select is-fullwidth">
+                      <select v-model="resourceForm.kind">
+                        <option value="file">fichero</option>
+                        <option value="directory">directorio</option>
+                      </select>
+                    </span>
+                  </p>
+                  <p class="control"><button class="button is-primary">Crear</button></p>
+                </div>
+              </form>
+
+              <div class="resource-tree">
+                <button
+                  v-for="resource in sortedResources"
+                  :key="resource.path"
+                  class="resource-row"
+                  :class="{ active: selectedResource?.path === resource.path, muted: !resource.id }"
+                  :style="{ paddingLeft: `${resourceDepth(resource) * 1.1 + 0.75}rem` }"
+                  @click="selectResource(resource)"
+                >
+                  <span class="resource-kind">{{ resource.kind === "directory" ? "dir" : "file" }}</span>
+                  <span class="resource-path">{{ resource.name }}</span>
+                  <span v-if="!resource.id" class="tag is-warning is-light">sin BD</span>
+                </button>
+              </div>
             </div>
 
             <div class="column">
-              <div class="field">
-                <label class="label">Archivo seleccionado</label>
-                <input v-model="localFileForm.filename" class="input" placeholder="Selecciona o crea un archivo" />
+              <div v-if="selectedResource" class="resource-detail">
+                <div class="is-flex is-align-items-center is-justify-content-space-between mb-3">
+                  <div>
+                    <p class="heading">Seleccionado</p>
+                    <h3 class="title is-5 mb-1">{{ selectedResource.path }}</h3>
+                    <p class="is-size-7 has-text-grey">
+                      {{ selectedResource.kind }} · {{ selectedResource.disk?.size ?? "-" }} B · chmod {{ chmodFor(selectedResource) }}
+                    </p>
+                  </div>
+                  <div class="buttons" v-if="selectedResource.id">
+                    <button class="button is-danger is-light" @click="deleteSelectedResource">Eliminar</button>
+                  </div>
+                </div>
+
+                <div v-if="!selectedResource.id" class="notification is-warning is-light">
+                  Este elemento existe en disco pero no en SQLite. Usa Sincronizar para persistirlo y poder asignarle permisos.
+                </div>
+
+                <div v-if="selectedResource.id" class="columns">
+                  <div class="column">
+                    <form class="field has-addons" @submit.prevent="renameSelectedResource">
+                      <p class="control is-expanded"><input v-model="renameForm.name" class="input" required /></p>
+                      <p class="control"><button class="button is-link">Renombrar</button></p>
+                    </form>
+
+                    <div v-if="selectedResource.kind === 'file'" class="field">
+                      <label class="label">Contenido</label>
+                      <textarea v-model="fileContent" class="textarea local-file-editor"></textarea>
+                      <button class="button is-primary mt-2" @click="saveContent">Guardar contenido</button>
+                    </div>
+                  </div>
+
+                  <div class="column is-5">
+                    <h4 class="title is-6">Permisos del recurso</h4>
+                    <form class="resource-permission-form" @submit.prevent="savePermission">
+                      <div class="field">
+                        <div class="select is-fullwidth">
+                          <select v-model="permissionForm.identityType" @change="permissionForm.identityId = ''">
+                            <option value="user">usuario</option>
+                            <option value="group">grupo</option>
+                          </select>
+                        </div>
+                      </div>
+                      <div class="field">
+                        <div class="select is-fullwidth">
+                          <select v-model.number="permissionForm.identityId" required>
+                            <option disabled value="">Identidad</option>
+                            <option v-for="item in permissionTargets" :key="item.id" :value="item.id">{{ item.username || item.name }}</option>
+                          </select>
+                        </div>
+                      </div>
+                      <div class="field is-flex is-gap-3">
+                        <label class="checkbox"><input v-model="permissionForm.canRead" type="checkbox" /> read</label>
+                        <label class="checkbox"><input v-model="permissionForm.canWrite" type="checkbox" /> write</label>
+                      </div>
+                      <button class="button is-primary is-fullwidth">Guardar permiso</button>
+                    </form>
+
+                    <table class="table is-fullwidth is-striped mt-3">
+                      <thead><tr><th>Identidad</th><th>R</th><th>W</th><th></th></tr></thead>
+                      <tbody>
+                        <tr v-for="permission in selectedPermissions" :key="permission.id">
+                          <td>{{ permission.identity?.name || `${permission.identityType} #${permission.identityId}` }}</td>
+                          <td>{{ permission.canRead ? "si" : "no" }}</td>
+                          <td>{{ permission.canWrite ? "si" : "no" }}</td>
+                          <td><button class="button is-small is-danger is-light" @click="deletePermission(permission)">Borrar</button></td>
+                        </tr>
+                        <tr v-if="selectedPermissions.length === 0"><td colspan="4">Sin permisos explicitos.</td></tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
               </div>
-              <div class="field">
-                <label class="label">Contenido</label>
-                <textarea
-                  v-model="localFileForm.content"
-                  class="textarea local-file-editor"
-                  :readonly="auth.user.role !== 'admin'"
-                  placeholder="Contenido del archivo"
-                ></textarea>
-              </div>
-              <div class="buttons" v-if="auth.user.role === 'admin'">
-                <button class="button is-primary" :disabled="!localFileForm.filename" @click="updateLocalFile">Guardar cambios</button>
-                <button class="button is-danger is-light" :disabled="!localFileForm.filename" @click="deleteLocalFile">Eliminar archivo</button>
-              </div>
-              <p v-if="auth.user.role === 'security'" class="notification is-info is-light">
-                El rol security puede leer archivos, pero no modificarlos.
-              </p>
-              <p v-if="auth.user.role === 'user'" class="notification is-danger is-light">
-                Acceso denegado para el rol user.
-              </p>
+              <div v-else class="notification is-info is-light">Selecciona un recurso para ver su contenido y permisos.</div>
             </div>
           </div>
-        </section>
-
-        <section v-if="activeTab === 'permissions'" class="panel-box">
-          <h2 class="title is-4">Permisos</h2>
-          <form class="columns is-multiline" @submit.prevent="savePermission">
-            <div class="column is-2">
-              <div class="select is-fullwidth">
-                <select v-model="permissionForm.identityType">
-                  <option value="user">usuario</option>
-                  <option value="group">grupo</option>
-                </select>
-              </div>
-            </div>
-            <div class="column is-3">
-              <div class="select is-fullwidth">
-                <select v-model.number="permissionForm.identityId" required>
-                  <option disabled value="">Identidad</option>
-                  <option v-for="item in permissionTargets" :key="item.id" :value="item.id">{{ item.username || item.name }}</option>
-                </select>
-              </div>
-            </div>
-            <div class="column is-4">
-              <div class="select is-fullwidth">
-                <select v-model.number="permissionForm.resourceId" required>
-                  <option disabled value="">Recurso</option>
-                  <option v-for="resource in resources" :key="resource.id" :value="resource.id">{{ resource.path }}</option>
-                </select>
-              </div>
-            </div>
-            <div class="column is-1"><label class="checkbox"><input v-model="permissionForm.canRead" type="checkbox" /> read</label></div>
-            <div class="column is-1"><label class="checkbox"><input v-model="permissionForm.canWrite" type="checkbox" /> write</label></div>
-            <div class="column is-narrow"><button class="button is-primary">Guardar</button></div>
-          </form>
-
-          <table class="table is-fullwidth is-striped">
-            <thead><tr><th>ID</th><th>Identidad</th><th>Recurso</th><th>Read</th><th>Write</th></tr></thead>
-            <tbody>
-              <tr v-for="permission in permissions" :key="permission.id">
-                <td>{{ permission.id }}</td>
-                <td>{{ permission.identityType }} #{{ permission.identityId }}</td>
-                <td class="resource-path">{{ permission.Resource?.path }}</td>
-                <td>{{ permission.canRead ? "si" : "no" }}</td>
-                <td>{{ permission.canWrite ? "si" : "no" }}</td>
-              </tr>
-            </tbody>
-          </table>
         </section>
 
         <section v-if="activeTab === 'simulator'" class="panel-box">
@@ -292,7 +249,7 @@
               <div class="select is-fullwidth">
                 <select v-model.number="accessForm.resourceId" required>
                   <option disabled value="">Recurso</option>
-                  <option v-for="resource in resources" :key="resource.id" :value="resource.id">{{ resource.path }}</option>
+                  <option v-for="resource in persistedResources" :key="resource.id" :value="resource.id">{{ resource.path }}</option>
                 </select>
               </div>
             </div>
@@ -351,44 +308,53 @@ const resources = ref([]);
 const permissions = ref([]);
 const logs = ref([]);
 const accessResult = ref(null);
-const localFiles = ref([]);
+const selectedResource = ref(null);
+const fileContent = ref("");
+const resourceRoot = ref("");
 
 const tabs = [
   { key: "overview", label: "Resumen" },
   { key: "users", label: "Usuarios" },
   { key: "groups", label: "Grupos" },
   { key: "resources", label: "Recursos" },
-  { key: "local-files", label: "Archivos reales" },
-  { key: "permissions", label: "Permisos" },
   { key: "simulator", label: "Simulador" },
   { key: "logs", label: "Logs" },
 ];
 
 const groupForm = reactive({ name: "", description: "" });
 const membership = reactive({ userId: "", groupId: "" });
-const resourceForm = reactive({
-  name: "",
-  path: "",
-  kind: "file",
-  checksum: "",
-  fileType: "",
-  parentId: null,
-  ownerUserId: null,
-  ownerGroupId: null,
-});
+const resourceForm = reactive({ name: "", kind: "file" });
+const renameForm = reactive({ name: "" });
 const permissionForm = reactive({
   identityType: "group",
   identityId: "",
-  resourceId: "",
   canRead: true,
   canWrite: false,
 });
 const accessForm = reactive({ userId: "", resourceId: "", action: "read" });
-const localFileForm = reactive({ filename: "", content: "" });
 
+const sortedResources = computed(() =>
+  [...resources.value].sort((left, right) => {
+    if (left.path === right.path) return 0;
+    return left.path.localeCompare(right.path);
+  }),
+);
+const persistedResources = computed(() => resources.value.filter((resource) => resource.id));
 const permissionTargets = computed(() =>
   permissionForm.identityType === "user" ? users.value : groups.value,
 );
+const selectedPermissions = computed(() =>
+  selectedResource.value?.id
+    ? permissions.value.filter((permission) => permission.resourceId === selectedResource.value.id)
+    : [],
+);
+const createParent = computed(() => {
+  if (!selectedResource.value?.id) return null;
+  if (selectedResource.value.kind === "directory") return selectedResource.value;
+  const parentPath = selectedResource.value.path.slice(0, selectedResource.value.path.lastIndexOf("/")) || "/";
+  return resources.value.find((resource) => resource.path === parentPath && resource.id) || null;
+});
+const createLocationLabel = computed(() => createParent.value?.path || "/");
 
 async function loadAll() {
   message.value = "";
@@ -403,70 +369,92 @@ async function loadAll() {
     users.value = usersRes.data.users;
     groups.value = groupsRes.data.groups;
     resources.value = resourcesRes.data.resources;
+    resourceRoot.value = resourcesRes.data.root;
     permissions.value = permissionsRes.data.permissions;
     logs.value = logsRes.data.logs;
-    await loadLocalFiles();
+    refreshSelected();
   } catch (err) {
     message.value = err.response?.data?.message || "No se pudieron cargar los datos";
   }
 }
 
-async function loadLocalFiles() {
+function refreshSelected() {
+  if (!selectedResource.value) return;
+  const current = resources.value.find((resource) => resource.path === selectedResource.value.path);
+  selectedResource.value = current || null;
+  renameForm.name = current?.name || "";
+}
+
+async function syncResources() {
   try {
-    const { data } = await http.get("/app/resources");
-    localFiles.value = data.files;
+    await http.post("/resources/sync");
+    await loadAll();
   } catch (err) {
-    localFiles.value = [];
-    if (auth.user.role !== "user") {
-      message.value = err.response?.data?.message || "No se pudieron cargar los archivos reales";
+    message.value = err.response?.data?.message || "No se pudo sincronizar";
+  }
+}
+
+async function selectResource(resource) {
+  selectedResource.value = resource;
+  renameForm.name = resource.name;
+  fileContent.value = "";
+  if (resource.id && resource.kind === "file") {
+    try {
+      const { data } = await http.get(`/resources/${resource.id}/content`);
+      fileContent.value = data.content;
+    } catch (err) {
+      message.value = err.response?.data?.message || "No se pudo leer el fichero";
     }
   }
 }
 
-async function openLocalFile(filename) {
+async function createResource() {
   try {
-    const { data } = await http.get(`/app/resources/${encodeURIComponent(filename)}`);
-    localFileForm.filename = data.filename;
-    localFileForm.content = data.content;
-  } catch (err) {
-    message.value = err.response?.data?.message || "No se pudo leer el archivo";
-  }
-}
-
-async function createLocalFile() {
-  try {
-    await http.post("/app/resources", {
-      filename: localFileForm.filename,
-      content: localFileForm.content,
+    await http.post("/resources", {
+      name: resourceForm.name,
+      kind: resourceForm.kind,
+      parentId: createParent.value?.id || null,
+      content: "",
     });
-    await loadLocalFiles();
+    resourceForm.name = "";
+    await loadAll();
   } catch (err) {
-    message.value = err.response?.data?.message || "No se pudo crear el archivo";
+    message.value = err.response?.data?.message || "No se pudo crear el recurso";
   }
 }
 
-async function updateLocalFile() {
+async function renameSelectedResource() {
+  if (!selectedResource.value?.id) return;
   try {
-    await http.put(`/app/resources/${encodeURIComponent(localFileForm.filename)}`, {
-      content: localFileForm.content,
-    });
-    await loadLocalFiles();
+    await http.patch(`/resources/${selectedResource.value.id}`, { name: renameForm.name });
+    await loadAll();
   } catch (err) {
-    message.value = err.response?.data?.message || "No se pudo actualizar el archivo";
+    message.value = err.response?.data?.message || "No se pudo renombrar";
   }
 }
 
-async function deleteLocalFile() {
-  const confirmed = window.confirm(`Seguro que quieres eliminar "${localFileForm.filename}"?`);
+async function saveContent() {
+  if (!selectedResource.value?.id) return;
+  try {
+    await http.put(`/resources/${selectedResource.value.id}/content`, { content: fileContent.value });
+    await loadAll();
+  } catch (err) {
+    message.value = err.response?.data?.message || "No se pudo guardar el contenido";
+  }
+}
+
+async function deleteSelectedResource() {
+  if (!selectedResource.value?.id) return;
+  const confirmed = window.confirm(`Seguro que quieres eliminar "${selectedResource.value.path}"?`);
   if (!confirmed) return;
 
   try {
-    await http.delete(`/app/resources/${encodeURIComponent(localFileForm.filename)}`);
-    localFileForm.filename = "";
-    localFileForm.content = "";
-    await loadLocalFiles();
+    await http.delete(`/resources/${selectedResource.value.id}`);
+    selectedResource.value = null;
+    fileContent.value = "";
+    await loadAll();
   } catch (err) {
-    message.value = err.response?.data?.message || "No se pudo eliminar el archivo";
+    message.value = err.response?.data?.message || "No se pudo eliminar el recurso";
   }
 }
 
@@ -478,7 +466,6 @@ async function updateUser(user) {
 async function deleteUser(user) {
   const confirmed = window.confirm(`Seguro que quieres borrar el usuario "${user.username}"?`);
   if (!confirmed) return;
-
   await http.delete(`/users/${user.id}`);
   await loadAll();
 }
@@ -497,29 +484,18 @@ async function assignMember() {
   await loadAll();
 }
 
-async function createResource() {
-  await http.post("/resources", {
-    ...resourceForm,
-    checksum: resourceForm.kind === "file" ? resourceForm.checksum || null : null,
-    fileType: resourceForm.kind === "file" ? resourceForm.fileType || "text/plain" : null,
+async function savePermission() {
+  if (!selectedResource.value?.id) return;
+  await http.post("/permissions", {
+    ...permissionForm,
+    resourceId: selectedResource.value.id,
   });
-  Object.assign(resourceForm, {
-    name: "",
-    path: "",
-    kind: "file",
-    checksum: "",
-    fileType: "",
-    parentId: null,
-    ownerUserId: null,
-    ownerGroupId: null,
-  });
+  permissionForm.identityId = "";
   await loadAll();
 }
 
-async function savePermission() {
-  await http.post("/permissions", { ...permissionForm });
-  permissionForm.identityId = "";
-  permissionForm.resourceId = "";
+async function deletePermission(permission) {
+  await http.delete(`/permissions/${permission.id}`);
   await loadAll();
 }
 
@@ -529,8 +505,14 @@ async function checkAccess() {
   await loadAll();
 }
 
+function resourceDepth(resource) {
+  return resource.path.split("/").filter(Boolean).length - 1;
+}
+
 function chmodFor(resource) {
-  const perms = resource.Permissions || [];
+  const perms = selectedResource.value?.id === resource.id
+    ? selectedPermissions.value
+    : permissions.value.filter((permission) => permission.resourceId === resource.id);
   const anyRead = perms.some((permission) => permission.canRead);
   const anyWrite = perms.some((permission) => permission.canWrite);
   const owner = "6";

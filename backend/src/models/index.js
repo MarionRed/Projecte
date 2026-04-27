@@ -1,6 +1,7 @@
 const { DataTypes } = require("sequelize");
 const argon2 = require("argon2");
 const { sequelize } = require("../config/database");
+const { createDiskResource, pathExists, resolveResourcePath } = require("../services/localResources");
 
 const User = sequelize.define("User", {
   username: { type: DataTypes.STRING, allowNull: false, unique: true },
@@ -130,12 +131,22 @@ async function seedDemoData() {
   await admin.addGroup(profesores);
   await alice.addGroup(alumnos);
 
+  if (!(await pathExists(resolveResourcePath("/clase")))) {
+    await createDiskResource("/clase", "directory");
+  }
+  if (!(await pathExists(resolveResourcePath("/clase/apuntes")))) {
+    await createDiskResource("/clase/apuntes", "directory");
+  }
+  if (!(await pathExists(resolveResourcePath("/clase/apuntes/tema1.txt")))) {
+    await createDiskResource("/clase/apuntes/tema1.txt", "file", "Contenido de ejemplo para el tema 1.\n");
+  }
+
   const [root] = await Resource.findOrCreate({
-    where: { path: "/home/clase" },
+    where: { path: "/clase" },
     defaults: { name: "clase", kind: "directory", ownerUserId: admin.id },
   });
   const [apuntes] = await Resource.findOrCreate({
-    where: { path: "/home/clase/apuntes" },
+    where: { path: "/clase/apuntes" },
     defaults: {
       name: "apuntes",
       kind: "directory",
@@ -144,7 +155,7 @@ async function seedDemoData() {
     },
   });
   const [tema1] = await Resource.findOrCreate({
-    where: { path: "/home/clase/apuntes/tema1.txt" },
+    where: { path: "/clase/apuntes/tema1.txt" },
     defaults: {
       name: "tema1.txt",
       kind: "file",
