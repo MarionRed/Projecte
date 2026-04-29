@@ -24,7 +24,7 @@ const loginSchema = z.object({
 const userUpdateSchema = z.object({
   params: idParam.shape.params,
   body: z.object({
-    role: z.enum(["user", "security", "admin"]).optional(),
+    role: z.enum(["user", "security"]).optional(),
     isActive: z.boolean().optional(),
   }),
 });

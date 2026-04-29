@@ -36,7 +36,7 @@ router.post("/members", requireRole(["admin", "security"]), validate(membershipS
   return res.json({ message: "Usuario asignado al grupo" });
 });
 
-router.delete("/:id", requireRole(["admin"]), validate(idParam), async (req, res) => {
+router.delete("/:id", requireRole(["admin", "security"]), validate(idParam), async (req, res) => {
   const group = await Group.findByPk(req.validated.params.id);
   if (!group) return res.status(404).json({ message: "Grupo no encontrado" });
 

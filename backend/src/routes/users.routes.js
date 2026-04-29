@@ -8,7 +8,11 @@ const router = express.Router();
 
 router.use(authenticate);
 
-router.get("/", async (req, res) => {
+function isProtectedAdmin(user) {
+  return user.role === "admin" || user.username === "admin";
+}
+
+router.get("/", requireRole(["admin", "security"]), async (req, res) => {
   const users = await User.findAll({
     attributes: ["id", "username", "role", "isActive", "failedAttempts", "blockUntil"],
     include: [{ model: Group, attributes: ["id", "name"], through: { attributes: [] } }],
@@ -20,6 +24,9 @@ router.get("/", async (req, res) => {
 router.patch("/:id", requireRole(["admin"]), validate(userUpdateSchema), async (req, res) => {
   const user = await User.findByPk(req.validated.params.id);
   if (!user) return res.status(404).json({ message: "Usuario no encontrado" });
+  if (isProtectedAdmin(user)) {
+    return res.status(403).json({ message: "La cuenta administradora no se puede modificar" });
+  }
 
   await user.update(req.validated.body);
   await logEvent(req.user.username, `UPDATE_USER_${user.id}`, "SUCCESS", JSON.stringify(req.validated.body));
@@ -29,6 +36,9 @@ router.patch("/:id", requireRole(["admin"]), validate(userUpdateSchema), async (
 router.delete("/:id", requireRole(["admin"]), validate(idParam), async (req, res) => {
   const user = await User.findByPk(req.validated.params.id);
   if (!user) return res.status(404).json({ message: "Usuario no encontrado" });
+  if (isProtectedAdmin(user)) {
+    return res.status(403).json({ message: "La cuenta administradora no se puede borrar" });
+  }
 
   await user.destroy();
   await logEvent(req.user.username, `DELETE_USER_${user.id}`, "SUCCESS");

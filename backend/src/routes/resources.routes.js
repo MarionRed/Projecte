@@ -8,6 +8,7 @@ const {
   resourceUpdateSchema,
 } = require("../validators/schemas");
 const { logEvent } = require("../models");
+const { requireResourceAccess } = require("../services/accessControl");
 const {
   createResourceWithRollback,
   deleteResourceWithRollback,
@@ -26,7 +27,7 @@ const router = express.Router();
 router.use(authenticate);
 
 router.get("/", async (req, res) => {
-  const { resources, tree, unpersisted } = await listResourceTree();
+  const { resources, tree, unpersisted } = await listResourceTree(req.user);
   res.json({ root: RESOURCE_ROOT, resources, tree, unpersisted });
 });
 
@@ -38,6 +39,9 @@ router.post("/sync", requireRole(["admin", "security"]), async (req, res) => {
 
 router.get("/:id", validate(idParam), async (req, res) => {
   const resource = await getResourceOr404(req.validated.params.id);
+  if (!["admin", "security"].includes(req.user.role)) {
+    await requireResourceAccess(req.user, resource, "read");
+  }
   const permissions = await listPermissionsForResource(resource.id);
   res.json({ resource, permissions });
 });

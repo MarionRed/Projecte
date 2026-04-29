@@ -2,7 +2,7 @@
   <main class="auth-page">
     <div class="auth-box">
       <section class="panel-box">
-        <p class="is-size-7 has-text-weight-semibold has-text-grey">AccessGuard IAM</p>
+        <p class="is-size-7 has-text-weight-semibold has-text-grey">Control de Accesos</p>
         <h1 class="title is-3">Acceso al panel</h1>
         <p class="subtitle is-6">
           Gestion de identidades, grupos, recursos, permisos y auditoria.

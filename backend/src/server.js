@@ -8,7 +8,7 @@ async function start() {
   await seedDemoData();
 
   app.listen(port, () => {
-    console.log(`Backend IAM en http://localhost:${port}`);
+    console.log(`Control de Accesos en http://localhost:${port}`);
   });
 }
 

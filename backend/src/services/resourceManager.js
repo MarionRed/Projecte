@@ -90,7 +90,38 @@ function buildTree(resources) {
   return roots;
 }
 
-async function listResourceTree() {
+async function filterResourcesForActor(resources, actor) {
+  if (!actor || ["admin", "security"].includes(actor.role)) {
+    return resources;
+  }
+
+  const user = await User.findByPk(actor.id, {
+    include: [{ model: Group, attributes: ["id"], through: { attributes: [] } }],
+  });
+  const groupIds = new Set((user?.Groups || []).map((group) => group.id));
+  const accessibleBasePaths = resources
+    .filter((resource) => {
+      if (resource.ownerUserId === actor.id) return true;
+
+      return (resource.Permissions || []).some((permission) => {
+        const grantsAccess = permission.canRead || permission.canWrite;
+        if (!grantsAccess) return false;
+        if (permission.identityType === "user") return permission.identityId === actor.id;
+        return groupIds.has(permission.identityId);
+      });
+    })
+    .map((resource) => resource.path);
+
+  return resources.filter((resource) => {
+    if (resource.ownerUserId === actor.id) return true;
+
+    return accessibleBasePaths.some(
+      (basePath) => resource.path === basePath || resource.path.startsWith(`${basePath}/`),
+    );
+  });
+}
+
+async function listResourceTree(actor = null) {
   const [resources, diskItems] = await Promise.all([
     Resource.findAll({
       include: [
@@ -102,29 +133,32 @@ async function listResourceTree() {
     }),
     scanDiskResources(),
   ]);
+  const visibleResources = await filterResourcesForActor(resources, actor);
   const diskByPath = new Map(diskItems.map((item) => [item.path, item]));
-  const resourcesByPath = new Map(resources.map((resource) => [resource.path, resource]));
+  const resourcesByPath = new Map(visibleResources.map((resource) => [resource.path, resource]));
 
-  const persisted = resources.map((resource) => {
+  const persisted = visibleResources.map((resource) => {
     const plain = resource.toJSON();
     plain.disk = diskByPath.get(resource.path) || { exists: false };
     return plain;
   });
 
-  const unpersisted = diskItems
-    .filter((item) => !resourcesByPath.has(item.path))
-    .map((item) => ({
-      id: null,
-      name: item.name,
-      path: item.path,
-      kind: item.kind,
-      parentId: resourcesByPath.get(parentPathOf(item.path))?.id || null,
-      fileType: item.kind === "file" ? "text/plain" : null,
-      checksum: item.checksum,
-      Permissions: [],
-      disk: { ...item, exists: true, persisted: false },
-      children: [],
-    }));
+  const unpersisted = actor && !["admin", "security"].includes(actor.role)
+    ? []
+    : diskItems
+      .filter((item) => !resourcesByPath.has(item.path))
+      .map((item) => ({
+        id: null,
+        name: item.name,
+        path: item.path,
+        kind: item.kind,
+        parentId: resourcesByPath.get(parentPathOf(item.path))?.id || null,
+        fileType: item.kind === "file" ? "text/plain" : null,
+        checksum: item.checksum,
+        Permissions: [],
+        disk: { ...item, exists: true, persisted: false },
+        children: [],
+      }));
 
   return {
     resources: [...persisted, ...unpersisted].sort((left, right) => left.path.localeCompare(right.path)),

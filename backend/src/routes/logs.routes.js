@@ -1,13 +1,22 @@
 const express = require("express");
-const { authenticate, requireRole } = require("../middleware/auth");
+const { authenticate } = require("../middleware/auth");
 const { Log } = require("../models");
 
 const router = express.Router();
 
-router.use(authenticate, requireRole(["admin", "security"]));
+router.use(authenticate);
 
 router.get("/", async (req, res) => {
-  const logs = await Log.findAll({ order: [["createdAt", "DESC"]], limit: 200 });
+  const query = {
+    order: [["createdAt", "DESC"]],
+    limit: 200,
+  };
+
+  if (!["admin", "security"].includes(req.user.role)) {
+    query.where = { actor: req.user.username };
+  }
+
+  const logs = await Log.findAll(query);
   res.json({ logs });
 });
 

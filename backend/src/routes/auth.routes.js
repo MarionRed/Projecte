@@ -32,7 +32,7 @@ router.post("/register", validate(registerSchema), async (req, res) => {
   }
 
   const secret = speakeasy.generateSecret({
-    name: `AccessGuard IAM (${username})`,
+    name: `Control de Accesos (${username})`,
     length: 20,
   });
 

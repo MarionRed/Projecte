@@ -66,7 +66,7 @@ router.post("/check", validate(accessCheckSchema), async (req, res) => {
   return res.json(result);
 });
 
-router.delete("/:id", requireRole(["admin"]), validate(idParam), async (req, res) => {
+router.delete("/:id", requireRole(["admin", "security"]), validate(idParam), async (req, res) => {
   const permission = await Permission.findByPk(req.validated.params.id);
   if (!permission) return res.status(404).json({ message: "Permiso no encontrado" });
 

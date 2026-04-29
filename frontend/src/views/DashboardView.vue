@@ -2,7 +2,7 @@
   <div class="app-shell">
     <header class="topbar p-3 is-flex is-align-items-center is-justify-content-space-between">
       <div>
-        <span class="brand is-size-4">AccessGuard IAM</span>
+        <span class="brand is-size-4">Control de Accesos</span>
         <span class="tag is-info is-light ml-3">{{ auth.user.username }} - {{ auth.user.role }}</span>
       </div>
       <button class="button is-light" @click="$emit('logout')">Salir</button>
@@ -25,7 +25,7 @@
         <div v-if="message" class="notification is-warning">{{ message }}</div>
 
         <section v-if="activeTab === 'overview'" class="panel-box">
-          <h1 class="title is-3">Panel IAM</h1>
+          <h1 class="title is-3">Panel de control</h1>
           <div class="columns">
             <div class="column"><div class="notification is-primary is-light"><p class="heading">Usuarios</p><p class="title is-4">{{ users.length }}</p></div></div>
             <div class="column"><div class="notification is-link is-light"><p class="heading">Grupos</p><p class="title is-4">{{ groups.length }}</p></div></div>
@@ -48,16 +48,24 @@
                 <td>{{ user.username }}</td>
                 <td>
                   <div class="select is-small">
-                    <select v-model="user.role" @change="updateUser(user)">
+                    <select v-model="user.role" :disabled="isProtectedAdmin(user)" @change="updateUser(user)">
                       <option>user</option>
                       <option>security</option>
-                      <option>admin</option>
+                      <option disabled>admin</option>
                     </select>
                   </div>
                 </td>
-                <td><label class="checkbox"><input v-model="user.isActive" type="checkbox" @change="updateUser(user)" /> Activa</label></td>
+                <td><label class="checkbox"><input v-model="user.isActive" type="checkbox" :disabled="isProtectedAdmin(user)" @change="updateUser(user)" /> Activa</label></td>
                 <td>{{ (user.Groups || []).map((group) => group.name).join(", ") || "-" }}</td>
-                <td><button class="button is-small is-danger is-light" @click="deleteUser(user)">Borrar</button></td>
+                <td>
+                  <button
+                    class="button is-small is-danger is-light"
+                    :disabled="isProtectedAdmin(user)"
+                    @click="deleteUser(user)"
+                  >
+                    Borrar
+                  </button>
+                </td>
               </tr>
             </tbody>
           </table>
@@ -92,13 +100,14 @@
           </form>
 
           <table class="table is-fullwidth is-striped">
-            <thead><tr><th>ID</th><th>Grupo</th><th>Descripcion</th><th>Miembros</th></tr></thead>
+            <thead><tr><th>ID</th><th>Grupo</th><th>Descripcion</th><th>Miembros</th><th></th></tr></thead>
             <tbody>
               <tr v-for="group in groups" :key="group.id">
                 <td>{{ group.id }}</td>
                 <td>{{ group.name }}</td>
                 <td>{{ group.description }}</td>
                 <td>{{ (group.Users || []).map((user) => user.username).join(", ") || "-" }}</td>
+                <td><button class="button is-small is-danger is-light" @click="deleteGroup(group)">Borrar</button></td>
               </tr>
             </tbody>
           </table>
@@ -111,14 +120,14 @@
               <p class="is-size-7 has-text-grey">{{ resourceRoot }}</p>
             </div>
             <div class="buttons">
-              <button class="button is-light" @click="syncResources">Sincronizar</button>
+              <button v-if="canManageCatalog" class="button is-light" @click="syncResources">Sincronizar</button>
               <button class="button is-light" @click="loadAll">Actualizar</button>
             </div>
           </div>
 
           <div class="columns">
             <div class="column is-4">
-              <form class="resource-create-box mb-4" @submit.prevent="createResource">
+              <form v-if="canManageCatalog" class="resource-create-box mb-4" @submit.prevent="createResource">
                 <div class="field">
                   <label class="label">Crear en</label>
                   <input class="input" :value="createLocationLabel" readonly />
@@ -165,30 +174,30 @@
                       {{ selectedResource.kind }} · {{ selectedResource.disk?.size ?? "-" }} B · chmod {{ chmodFor(selectedResource) }}
                     </p>
                   </div>
-                  <div class="buttons" v-if="selectedResource.id">
+                  <div class="buttons" v-if="selectedResource.id && canManageCatalog">
                     <button class="button is-danger is-light" @click="deleteSelectedResource">Eliminar</button>
                   </div>
                 </div>
 
-                <div v-if="!selectedResource.id" class="notification is-warning is-light">
+                <div v-if="!selectedResource.id && canManageCatalog" class="notification is-warning is-light">
                   Este elemento existe en disco pero no en SQLite. Usa Sincronizar para persistirlo y poder asignarle permisos.
                 </div>
 
                 <div v-if="selectedResource.id" class="columns">
                   <div class="column">
-                    <form class="field has-addons" @submit.prevent="renameSelectedResource">
+                    <form v-if="canManageCatalog" class="field has-addons" @submit.prevent="renameSelectedResource">
                       <p class="control is-expanded"><input v-model="renameForm.name" class="input" required /></p>
                       <p class="control"><button class="button is-link">Renombrar</button></p>
                     </form>
 
                     <div v-if="selectedResource.kind === 'file'" class="field">
                       <label class="label">Contenido</label>
-                      <textarea v-model="fileContent" class="textarea local-file-editor"></textarea>
-                      <button class="button is-primary mt-2" @click="saveContent">Guardar contenido</button>
+                      <textarea v-model="fileContent" class="textarea local-file-editor" :readonly="!canManageCatalog"></textarea>
+                      <button v-if="canManageCatalog" class="button is-primary mt-2" @click="saveContent">Guardar contenido</button>
                     </div>
                   </div>
 
-                  <div class="column is-5">
+                  <div v-if="canManageCatalog" class="column is-5">
                     <h4 class="title is-6">Permisos del recurso</h4>
                     <form class="resource-permission-form" @submit.prevent="savePermission">
                       <div class="field">
@@ -273,7 +282,7 @@
         </section>
 
         <section v-if="activeTab === 'logs'" class="panel-box">
-          <h2 class="title is-4">Auditoria</h2>
+          <h2 class="title is-4">Actividad</h2>
           <table class="table is-fullwidth is-striped">
             <thead><tr><th>Fecha</th><th>Actor</th><th>Accion</th><th>Estado</th><th>Detalle</th></tr></thead>
             <tbody>
@@ -312,14 +321,17 @@ const selectedResource = ref(null);
 const fileContent = ref("");
 const resourceRoot = ref("");
 
-const tabs = [
+const isAdmin = computed(() => auth.user?.role === "admin");
+const canManageCatalog = computed(() => ["admin", "security"].includes(auth.user?.role));
+const canUseSimulator = computed(() => canManageCatalog.value);
+const tabs = computed(() => [
   { key: "overview", label: "Resumen" },
-  { key: "users", label: "Usuarios" },
-  { key: "groups", label: "Grupos" },
+  ...(isAdmin.value ? [{ key: "users", label: "Usuarios" }] : []),
+  ...(canManageCatalog.value ? [{ key: "groups", label: "Grupos" }] : []),
   { key: "resources", label: "Recursos" },
-  { key: "simulator", label: "Simulador" },
+  ...(canUseSimulator.value ? [{ key: "simulator", label: "Simulador" }] : []),
   { key: "logs", label: "Logs" },
-];
+]);
 
 const groupForm = reactive({ name: "", description: "" });
 const membership = reactive({ userId: "", groupId: "" });
@@ -359,19 +371,30 @@ const createLocationLabel = computed(() => createParent.value?.path || "/");
 async function loadAll() {
   message.value = "";
   try {
-    const [usersRes, groupsRes, resourcesRes, permissionsRes, logsRes] = await Promise.all([
-      http.get("/users"),
-      http.get("/groups"),
-      http.get("/resources"),
-      http.get("/permissions"),
-      http.get("/logs"),
-    ]);
-    users.value = usersRes.data.users;
-    groups.value = groupsRes.data.groups;
+    const requests = [http.get("/resources"), http.get("/logs")];
+    if (canManageCatalog.value) {
+      requests.push(http.get("/users"), http.get("/groups"), http.get("/permissions"));
+    }
+
+    const [resourcesRes, logsRes, usersRes, groupsRes, permissionsRes] = await Promise.all(requests);
     resources.value = resourcesRes.data.resources;
     resourceRoot.value = resourcesRes.data.root;
-    permissions.value = permissionsRes.data.permissions;
     logs.value = logsRes.data.logs;
+
+    if (canManageCatalog.value) {
+      users.value = usersRes.data.users;
+      groups.value = groupsRes.data.groups;
+      permissions.value = permissionsRes.data.permissions;
+    } else {
+      users.value = [];
+      groups.value = [];
+      permissions.value = [];
+    }
+
+    if (!tabs.value.some((tab) => tab.key === activeTab.value)) {
+      activeTab.value = "overview";
+    }
+
     refreshSelected();
   } catch (err) {
     message.value = err.response?.data?.message || "No se pudieron cargar los datos";
@@ -383,6 +406,10 @@ function refreshSelected() {
   const current = resources.value.find((resource) => resource.path === selectedResource.value.path);
   selectedResource.value = current || null;
   renameForm.name = current?.name || "";
+}
+
+function isProtectedAdmin(user) {
+  return user.role === "admin" || user.username === "admin";
 }
 
 async function syncResources() {
@@ -459,11 +486,18 @@ async function deleteSelectedResource() {
 }
 
 async function updateUser(user) {
-  await http.patch(`/users/${user.id}`, { role: user.role, isActive: user.isActive });
-  await loadAll();
+  if (isProtectedAdmin(user)) return;
+  try {
+    await http.patch(`/users/${user.id}`, { role: user.role, isActive: user.isActive });
+    await loadAll();
+  } catch (err) {
+    message.value = err.response?.data?.message || "No se pudo actualizar el usuario";
+    await loadAll();
+  }
 }
 
 async function deleteUser(user) {
+  if (isProtectedAdmin(user)) return;
   const confirmed = window.confirm(`Seguro que quieres borrar el usuario "${user.username}"?`);
   if (!confirmed) return;
   await http.delete(`/users/${user.id}`);
@@ -481,6 +515,13 @@ async function assignMember() {
   await http.post("/groups/members", { ...membership });
   membership.userId = "";
   membership.groupId = "";
+  await loadAll();
+}
+
+async function deleteGroup(group) {
+  const confirmed = window.confirm(`Seguro que quieres borrar el grupo "${group.name}"?`);
+  if (!confirmed) return;
+  await http.delete(`/groups/${group.id}`);
   await loadAll();
 }
 
