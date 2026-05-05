@@ -2,7 +2,7 @@
 
 Control de Accesos es una aplicacion web para gestionar usuarios, grupos, recursos locales y permisos de lectura/escritura. El proyecto simula un sistema de autorizacion sobre ficheros reales, combinando una interfaz Vue con una API Express que valida cada accion antes de operar sobre disco o base de datos.
 
-La aplicacion esta pensada para mostrar de forma clara como funcionan los roles, los permisos directos, los permisos por grupo, la herencia sobre carpetas y la auditoria de actividad.
+La aplicacion esta pensada para mostrar de forma clara como funcionan los roles, los permisos directos, los permisos por grupo, los permisos sobre carpetas y la auditoria de actividad.
 
 ## Indice
 
@@ -47,7 +47,7 @@ El backend no confia en la interfaz: todas las operaciones sensibles se vuelven 
 - Explorador de recursos locales dentro de `RESOURCE_ROOT`.
 - Sincronizacion entre disco y SQLite.
 - Lectura de ficheros permitidos.
-- Herencia de permisos sobre carpetas.
+- Permisos especificos sobre carpetas y ficheros.
 - Simulador de acceso permitido o denegado.
 - Logs generales para administradores y personal de seguridad.
 - Logs propios para usuarios estandar.
@@ -176,8 +176,8 @@ Comprueba:
 - Si el usuario es `admin`.
 - Si el usuario es propietario del recurso.
 - Si existe permiso directo.
-- Si existe permiso heredado por grupo.
-- Si el permiso viene de una carpeta padre.
+- Si existe permiso por grupo.
+- Si existe permiso directo sobre el recurso.
 
 Un permiso `write` tambien permite leer.
 
@@ -385,9 +385,9 @@ Registra actividad relevante:
 4. El backend crea o actualiza el permiso.
 5. El usuario afectado ve el recurso si el permiso le aplica.
 
-### Herencia de carpetas
+### Permisos sobre carpetas
 
-Si un usuario tiene permiso sobre una carpeta, ese permiso se aplica tambien a los recursos que hay dentro.
+Los permisos sobre una carpeta aplican a la carpeta como recurso. Un permiso `write` sobre una carpeta permite crear nuevos recursos dentro de ella, pero no permite leer ni modificar automaticamente los ficheros o carpetas que ya existan dentro.
 
 Ejemplo:
 
@@ -396,7 +396,7 @@ Ejemplo:
 /clase/apuntes/tema1.txt
 ```
 
-Si `jairo` tiene `read` sobre `/clase/apuntes`, tambien puede ver y leer `/clase/apuntes/tema1.txt`.
+Si `jairo` tiene `read` sobre `/clase/apuntes`, puede ver esa carpeta. Para leer `/clase/apuntes/tema1.txt`, necesita permiso directo sobre ese fichero, ser su propietario o tener rol `admin`/`security`.
 
 ### Lectura de archivos
 
@@ -439,8 +439,8 @@ Orden general:
 
 1. `admin` tiene acceso total.
 2. El propietario del recurso tiene acceso.
-3. Se buscan permisos directos sobre el recurso o sus carpetas padre.
-4. Se buscan permisos por grupo sobre el recurso o sus carpetas padre.
+3. Se buscan permisos directos de usuario sobre el recurso.
+4. Se buscan permisos directos por grupo sobre el recurso.
 5. Si no hay coincidencia, se deniega.
 
 ### Seguridad de rutas locales
@@ -588,8 +588,8 @@ Una forma clara de explicar la aplicacion:
 3. Crear o revisar un grupo, por ejemplo `alumnos`.
 4. Mostrar un recurso tipo carpeta.
 5. Asignar permiso de lectura sobre la carpeta.
-6. Entrar como usuario estandar y comprobar que ve la carpeta y sus archivos.
-7. Abrir un fichero permitido.
+6. Entrar como usuario estandar y comprobar que ve la carpeta.
+7. Asignar permiso directo a un fichero y abrirlo como usuario permitido.
 8. Volver a logs y mostrar que la accion ha quedado registrada.
 9. Usar el simulador para justificar una decision de acceso.
 

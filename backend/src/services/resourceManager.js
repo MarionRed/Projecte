@@ -2,7 +2,7 @@ const fs = require("fs/promises");
 const path = require("path");
 const { Op } = require("sequelize");
 const { sequelize, Permission, Resource, User, Group } = require("../models");
-const { requireResourceAccess } = require("./accessControl");
+const { getEffectiveResourceAccess, requireResourceAccess } = require("./accessControl");
 const {
   createDiskResource,
   joinResourcePath,
@@ -21,6 +21,10 @@ const {
 
 function httpError(message, statusCode = 400) {
   return Object.assign(new Error(message), { statusCode });
+}
+
+function canManageCatalog(actor) {
+  return ["admin", "security"].includes(actor?.role);
 }
 
 function parentPathOf(resourcePath) {
@@ -63,6 +67,7 @@ function buildTree(resources) {
     ownerUser: resource.ownerUser,
     ownerGroup: resource.ownerGroup,
     Permissions: resource.Permissions || [],
+    access: resource.access || null,
     disk: resource.disk || null,
     children: [],
   }));
@@ -99,25 +104,16 @@ async function filterResourcesForActor(resources, actor) {
     include: [{ model: Group, attributes: ["id"], through: { attributes: [] } }],
   });
   const groupIds = new Set((user?.Groups || []).map((group) => group.id));
-  const accessibleBasePaths = resources
-    .filter((resource) => {
-      if (resource.ownerUserId === actor.id) return true;
-
-      return (resource.Permissions || []).some((permission) => {
-        const grantsAccess = permission.canRead || permission.canWrite;
-        if (!grantsAccess) return false;
-        if (permission.identityType === "user") return permission.identityId === actor.id;
-        return groupIds.has(permission.identityId);
-      });
-    })
-    .map((resource) => resource.path);
 
   return resources.filter((resource) => {
     if (resource.ownerUserId === actor.id) return true;
 
-    return accessibleBasePaths.some(
-      (basePath) => resource.path === basePath || resource.path.startsWith(`${basePath}/`),
-    );
+    return (resource.Permissions || []).some((permission) => {
+      const grantsAccess = permission.canRead || permission.canWrite;
+      if (!grantsAccess) return false;
+      if (permission.identityType === "user") return permission.identityId === actor.id;
+      return groupIds.has(permission.identityId);
+    });
   });
 }
 
@@ -137,11 +133,12 @@ async function listResourceTree(actor = null) {
   const diskByPath = new Map(diskItems.map((item) => [item.path, item]));
   const resourcesByPath = new Map(visibleResources.map((resource) => [resource.path, resource]));
 
-  const persisted = visibleResources.map((resource) => {
+  const persisted = await Promise.all(visibleResources.map(async (resource) => {
     const plain = resource.toJSON();
     plain.disk = diskByPath.get(resource.path) || { exists: false };
+    plain.access = await getEffectiveResourceAccess(actor, resource);
     return plain;
-  });
+  }));
 
   const unpersisted = actor && !["admin", "security"].includes(actor.role)
     ? []
@@ -156,6 +153,7 @@ async function listResourceTree(actor = null) {
         fileType: item.kind === "file" ? "text/plain" : null,
         checksum: item.checksum,
         Permissions: [],
+        access: { canRead: true, canWrite: true, isOwner: false },
         disk: { ...item, exists: true, persisted: false },
         children: [],
       }));
@@ -212,6 +210,10 @@ async function syncFromDisk() {
 
 async function createResourceWithRollback(data, actor) {
   const parent = await resolveParent(data.parentId);
+  if (!parent && !canManageCatalog(actor)) {
+    throw httpError("Debes seleccionar una carpeta con permiso de escritura", 403);
+  }
+
   if (parent) {
     await requireResourceAccess(actor, parent, "write");
   }
@@ -236,8 +238,8 @@ async function createResourceWithRollback(data, actor) {
           path: resourcePath,
           kind,
           parentId: parent?.id || null,
-          ownerUserId: data.ownerUserId || actor.id,
-          ownerGroupId: data.ownerGroupId || null,
+          ownerUserId: canManageCatalog(actor) ? data.ownerUserId || actor.id : actor.id,
+          ownerGroupId: canManageCatalog(actor) ? data.ownerGroupId || null : null,
           fileType: kind === "file" ? data.fileType || "text/plain" : null,
           checksum: metadata.checksum,
         },

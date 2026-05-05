@@ -1,18 +1,9 @@
 const { Group, Permission, Resource, User } = require("../models");
 
-function ancestorPathsOf(resourcePath) {
-  const parts = resourcePath.split("/").filter(Boolean);
-  return parts.map((_, index) => `/${parts.slice(0, index + 1).join("/")}`);
-}
-
 function permissionAllows(permission, action) {
   if (!permission) return false;
   if (action === "read") return permission.canRead || permission.canWrite;
   return permission.canWrite;
-}
-
-function resourceCoversPath(parentPath, childPath) {
-  return childPath === parentPath || childPath.startsWith(`${parentPath}/`);
 }
 
 async function explainAccess(userId, resourceId, action) {
@@ -25,52 +16,34 @@ async function explainAccess(userId, resourceId, action) {
     return { allowed: false, reason: "Usuario o recurso no encontrado" };
   }
 
-  if (user.role === "admin") {
-    return { allowed: true, reason: "El rol admin tiene acceso completo" };
+  if (["admin", "security"].includes(user.role)) {
+    return { allowed: true, reason: `El rol ${user.role} tiene acceso completo` };
   }
 
   if (resource.ownerUserId === user.id) {
     return { allowed: true, reason: "El usuario es propietario del recurso" };
   }
 
-  const ancestorPaths = ancestorPathsOf(resource.path);
-  const ancestorResources = await Resource.findAll({ where: { path: ancestorPaths } });
-  const ancestorById = new Map(ancestorResources.map((item) => [item.id, item]));
-  const ancestorIds = ancestorResources.map((item) => item.id);
-
-  const ownerAncestor = ancestorResources.find((item) => item.ownerUserId === user.id);
-  if (ownerAncestor) {
-    return { allowed: true, reason: `El usuario es propietario de ${ownerAncestor.path}` };
-  }
-
   const userPermissions = await Permission.findAll({
-    where: { identityType: "user", identityId: user.id, resourceId: ancestorIds },
+    where: { identityType: "user", identityId: user.id, resourceId: resource.id },
   });
   const userPermission = userPermissions.find((permission) => permissionAllows(permission, action));
 
   if (userPermission) {
-    const grantedResource = ancestorById.get(userPermission.resourceId);
-    const scope = grantedResource && resourceCoversPath(grantedResource.path, resource.path)
-      ? ` en ${grantedResource.path}`
-      : "";
-    return { allowed: true, reason: `Permiso directo de usuario para ${action}${scope}` };
+    return { allowed: true, reason: `Permiso directo de usuario para ${action} en ${resource.path}` };
   }
 
   const groupIds = user.Groups.map((group) => group.id);
   const groupPermissions = await Permission.findAll({
-    where: { identityType: "group", identityId: groupIds, resourceId: ancestorIds },
+    where: { identityType: "group", identityId: groupIds, resourceId: resource.id },
   });
   const groupPermission = groupPermissions.find((permission) => permissionAllows(permission, action));
 
   if (groupPermission) {
     const group = user.Groups.find((item) => item.id === groupPermission.identityId);
-    const grantedResource = ancestorById.get(groupPermission.resourceId);
-    const scope = grantedResource && resourceCoversPath(grantedResource.path, resource.path)
-      ? ` en ${grantedResource.path}`
-      : "";
     return {
       allowed: true,
-      reason: `Permiso heredado del grupo ${group?.name || groupPermission.identityId}${scope}`,
+      reason: `Permiso directo del grupo ${group?.name || groupPermission.identityId} para ${action} en ${resource.path}`,
     };
   }
 
@@ -85,7 +58,25 @@ async function requireResourceAccess(user, resource, action) {
   return result;
 }
 
+async function getEffectiveResourceAccess(user, resource) {
+  if (!user || !resource?.id) {
+    return { canRead: false, canWrite: false, isOwner: false };
+  }
+
+  const [readAccess, writeAccess] = await Promise.all([
+    explainAccess(user.id, resource.id, "read"),
+    explainAccess(user.id, resource.id, "write"),
+  ]);
+
+  return {
+    canRead: readAccess.allowed,
+    canWrite: writeAccess.allowed,
+    isOwner: resource.ownerUserId === user.id,
+  };
+}
+
 module.exports = {
   explainAccess,
+  getEffectiveResourceAccess,
   requireResourceAccess,
 };

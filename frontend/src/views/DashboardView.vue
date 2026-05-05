@@ -127,7 +127,7 @@
 
           <div class="columns">
             <div class="column is-4">
-              <form v-if="canManageCatalog" class="resource-create-box mb-4" @submit.prevent="createResource">
+              <form v-if="canCreateResource" class="resource-create-box mb-4" @submit.prevent="createResource">
                 <div class="field">
                   <label class="label">Crear en</label>
                   <input class="input" :value="createLocationLabel" readonly />
@@ -171,10 +171,10 @@
                     <p class="heading">Seleccionado</p>
                     <h3 class="title is-5 mb-1">{{ selectedResource.path }}</h3>
                     <p class="is-size-7 has-text-grey">
-                      {{ selectedResource.kind }} · {{ selectedResource.disk?.size ?? "-" }} B · chmod {{ chmodFor(selectedResource) }}
+                      {{ selectedResource.kind }} · {{ selectedResource.disk?.size ?? "-" }} B · permisos {{ accessLabelFor(selectedResource) }}
                     </p>
                   </div>
-                  <div class="buttons" v-if="selectedResource.id && canManageCatalog">
+                  <div class="buttons" v-if="selectedResource.id && canWriteSelectedResource">
                     <button class="button is-danger is-light" @click="deleteSelectedResource">Eliminar</button>
                   </div>
                 </div>
@@ -185,15 +185,15 @@
 
                 <div v-if="selectedResource.id" class="columns">
                   <div class="column">
-                    <form v-if="canManageCatalog" class="field has-addons" @submit.prevent="renameSelectedResource">
+                    <form v-if="canWriteSelectedResource" class="field has-addons" @submit.prevent="renameSelectedResource">
                       <p class="control is-expanded"><input v-model="renameForm.name" class="input" required /></p>
                       <p class="control"><button class="button is-link">Renombrar</button></p>
                     </form>
 
                     <div v-if="selectedResource.kind === 'file'" class="field">
                       <label class="label">Contenido</label>
-                      <textarea v-model="fileContent" class="textarea local-file-editor" :readonly="!canManageCatalog"></textarea>
-                      <button v-if="canManageCatalog" class="button is-primary mt-2" @click="saveContent">Guardar contenido</button>
+                      <textarea v-model="fileContent" class="textarea local-file-editor" :readonly="!canWriteSelectedResource"></textarea>
+                      <button v-if="canWriteSelectedResource" class="button is-primary mt-2" @click="saveContent">Guardar contenido</button>
                     </div>
                   </div>
 
@@ -367,6 +367,10 @@ const createParent = computed(() => {
   return resources.value.find((resource) => resource.path === parentPath && resource.id) || null;
 });
 const createLocationLabel = computed(() => createParent.value?.path || "/");
+const canCreateResource = computed(() => canManageCatalog.value || !!createParent.value?.access?.canWrite);
+const canWriteSelectedResource = computed(
+  () => canManageCatalog.value || !!selectedResource.value?.access?.canWrite,
+);
 
 async function loadAll() {
   message.value = "";
@@ -436,6 +440,8 @@ async function selectResource(resource) {
 }
 
 async function createResource() {
+  if (!canCreateResource.value) return;
+
   try {
     await http.post("/resources", {
       name: resourceForm.name,
@@ -550,16 +556,13 @@ function resourceDepth(resource) {
   return resource.path.split("/").filter(Boolean).length - 1;
 }
 
-function chmodFor(resource) {
-  const perms = selectedResource.value?.id === resource.id
-    ? selectedPermissions.value
-    : permissions.value.filter((permission) => permission.resourceId === resource.id);
-  const anyRead = perms.some((permission) => permission.canRead);
-  const anyWrite = perms.some((permission) => permission.canWrite);
-  const owner = "6";
-  const group = anyWrite ? "6" : anyRead ? "4" : "0";
-  const other = "0";
-  return `${owner}${group}${other}`;
+function accessLabelFor(resource) {
+  const canRead = !!resource?.access?.canRead;
+  const canWrite = !!resource?.access?.canWrite;
+  if (canRead && canWrite) return "RW";
+  if (canRead) return "R";
+  if (canWrite) return "W";
+  return "-";
 }
 
 onMounted(loadAll);

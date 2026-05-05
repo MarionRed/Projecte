@@ -52,13 +52,13 @@ router.get("/:id/content", validate(idParam), async (req, res) => {
   res.json({ resource, content });
 });
 
-router.post("/", requireRole(["admin", "security"]), validate(resourceSchema), async (req, res) => {
+router.post("/", validate(resourceSchema), async (req, res) => {
   const resource = await createResourceWithRollback(req.validated.body, req.user);
   await logEvent(req.user.username, "CREATE_RESOURCE", "SUCCESS", resource.path);
   res.status(201).json({ resource });
 });
 
-router.put("/:id/content", requireRole(["admin", "security"]), validate(resourceContentSchema), async (req, res) => {
+router.put("/:id/content", validate(resourceContentSchema), async (req, res) => {
   const resource = await updateResourceContent(
     req.validated.params.id,
     req.validated.body.content,
@@ -68,13 +68,13 @@ router.put("/:id/content", requireRole(["admin", "security"]), validate(resource
   res.json({ resource });
 });
 
-router.patch("/:id", requireRole(["admin", "security"]), validate(resourceUpdateSchema), async (req, res) => {
+router.patch("/:id", validate(resourceUpdateSchema), async (req, res) => {
   const resource = await renameResourceWithRollback(req.validated.params.id, req.validated.body, req.user);
   await logEvent(req.user.username, "RENAME_RESOURCE", "SUCCESS", resource.path);
   res.json({ resource });
 });
 
-router.delete("/:id", requireRole(["admin", "security"]), validate(idParam), async (req, res) => {
+router.delete("/:id", validate(idParam), async (req, res) => {
   await deleteResourceWithRollback(req.validated.params.id, req.user);
   await logEvent(req.user.username, "DELETE_RESOURCE", "SUCCESS", String(req.validated.params.id));
   return res.status(204).send();
