@@ -197,7 +197,7 @@
                     </div>
                   </div>
 
-                  <div v-if="canManageCatalog" class="column is-5">
+                  <div v-if="canManageSelectedPermissions" class="column is-5">
                     <h4 class="title is-6">Permisos del recurso</h4>
                     <form class="resource-permission-form" @submit.prevent="savePermission">
                       <div class="field">
@@ -371,29 +371,28 @@ const canCreateResource = computed(() => canManageCatalog.value || !!createParen
 const canWriteSelectedResource = computed(
   () => canManageCatalog.value || !!selectedResource.value?.access?.canWrite,
 );
+const canManageSelectedPermissions = computed(
+  () => canManageCatalog.value || !!selectedResource.value?.access?.isOwner,
+);
 
 async function loadAll() {
   message.value = "";
   try {
-    const requests = [http.get("/resources"), http.get("/logs")];
-    if (canManageCatalog.value) {
-      requests.push(http.get("/users"), http.get("/groups"), http.get("/permissions"));
-    }
+    const requests = [
+      http.get("/resources"),
+      http.get("/logs"),
+      http.get("/users"),
+      http.get("/groups"),
+      http.get("/permissions"),
+    ];
 
     const [resourcesRes, logsRes, usersRes, groupsRes, permissionsRes] = await Promise.all(requests);
     resources.value = resourcesRes.data.resources;
     resourceRoot.value = resourcesRes.data.root;
     logs.value = logsRes.data.logs;
-
-    if (canManageCatalog.value) {
-      users.value = usersRes.data.users;
-      groups.value = groupsRes.data.groups;
-      permissions.value = permissionsRes.data.permissions;
-    } else {
-      users.value = [];
-      groups.value = [];
-      permissions.value = [];
-    }
+    users.value = usersRes.data.users;
+    groups.value = groupsRes.data.groups;
+    permissions.value = permissionsRes.data.permissions;
 
     if (!tabs.value.some((tab) => tab.key === activeTab.value)) {
       activeTab.value = "overview";

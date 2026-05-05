@@ -6,6 +6,11 @@ function permissionAllows(permission, action) {
   return permission.canWrite;
 }
 
+function canManageResourcePermissions(actor, resource) {
+  if (!actor || !resource) return false;
+  return ["admin", "security"].includes(actor.role) || resource.ownerUserId === actor.id;
+}
+
 async function explainAccess(userId, resourceId, action) {
   const user = await User.findByPk(userId, {
     include: [{ model: Group, attributes: ["id", "name"], through: { attributes: [] } }],
@@ -76,6 +81,7 @@ async function getEffectiveResourceAccess(user, resource) {
 }
 
 module.exports = {
+  canManageResourcePermissions,
   explainAccess,
   getEffectiveResourceAccess,
   requireResourceAccess,

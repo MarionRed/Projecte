@@ -8,7 +8,7 @@ const {
   resourceUpdateSchema,
 } = require("../validators/schemas");
 const { logEvent } = require("../models");
-const { requireResourceAccess } = require("../services/accessControl");
+const { canManageResourcePermissions, requireResourceAccess } = require("../services/accessControl");
 const {
   createResourceWithRollback,
   deleteResourceWithRollback,
@@ -42,7 +42,9 @@ router.get("/:id", validate(idParam), async (req, res) => {
   if (!["admin", "security"].includes(req.user.role)) {
     await requireResourceAccess(req.user, resource, "read");
   }
-  const permissions = await listPermissionsForResource(resource.id);
+  const permissions = canManageResourcePermissions(req.user, resource)
+    ? await listPermissionsForResource(resource.id)
+    : [];
   res.json({ resource, permissions });
 });
 

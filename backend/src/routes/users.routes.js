@@ -12,13 +12,22 @@ function isProtectedAdmin(user) {
   return user.role === "admin" || user.username === "admin";
 }
 
-router.get("/", requireRole(["admin", "security"]), async (req, res) => {
+router.get("/", async (req, res) => {
+  if (!["admin", "security"].includes(req.user.role)) {
+    const users = await User.findAll({
+      attributes: ["id", "username"],
+      where: { isActive: true },
+      order: [["id", "ASC"]],
+    });
+    return res.json({ users });
+  }
+
   const users = await User.findAll({
     attributes: ["id", "username", "role", "isActive", "failedAttempts", "blockUntil"],
     include: [{ model: Group, attributes: ["id", "name"], through: { attributes: [] } }],
     order: [["id", "ASC"]],
   });
-  res.json({ users });
+  return res.json({ users });
 });
 
 router.patch("/:id", requireRole(["admin"]), validate(userUpdateSchema), async (req, res) => {

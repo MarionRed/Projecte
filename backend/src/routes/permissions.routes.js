@@ -1,9 +1,9 @@
 const express = require("express");
-const { authenticate, requireRole } = require("../middleware/auth");
+const { authenticate } = require("../middleware/auth");
 const { validate } = require("../middleware/validate");
 const { permissionSchema, accessCheckSchema, idParam } = require("../validators/schemas");
 const { User, Group, Resource, Permission, logEvent } = require("../models");
-const { explainAccess } = require("../services/accessControl");
+const { canManageResourcePermissions, explainAccess } = require("../services/accessControl");
 const { getPermissionIdentity } = require("../services/resourceManager");
 
 const router = express.Router();
@@ -11,8 +11,13 @@ const router = express.Router();
 router.use(authenticate);
 
 router.get("/", async (req, res) => {
+  const include = [{ model: Resource }];
+  if (!["admin", "security"].includes(req.user.role)) {
+    include[0].where = { ownerUserId: req.user.id };
+  }
+
   const permissions = await Permission.findAll({
-    include: [{ model: Resource }],
+    include,
     order: [["id", "ASC"]],
   });
   const enriched = await Promise.all(
@@ -25,10 +30,13 @@ router.get("/", async (req, res) => {
   res.json({ permissions: enriched });
 });
 
-router.post("/", requireRole(["admin", "security"]), validate(permissionSchema), async (req, res) => {
+router.post("/", validate(permissionSchema), async (req, res) => {
   const data = req.validated.body;
   const resource = await Resource.findByPk(data.resourceId);
   if (!resource) return res.status(404).json({ message: "Recurso no encontrado" });
+  if (!canManageResourcePermissions(req.user, resource)) {
+    return res.status(403).json({ message: "No puedes gestionar permisos de este recurso" });
+  }
 
   const target =
     data.identityType === "user"
@@ -66,9 +74,14 @@ router.post("/check", validate(accessCheckSchema), async (req, res) => {
   return res.json(result);
 });
 
-router.delete("/:id", requireRole(["admin", "security"]), validate(idParam), async (req, res) => {
-  const permission = await Permission.findByPk(req.validated.params.id);
+router.delete("/:id", validate(idParam), async (req, res) => {
+  const permission = await Permission.findByPk(req.validated.params.id, {
+    include: [{ model: Resource }],
+  });
   if (!permission) return res.status(404).json({ message: "Permiso no encontrado" });
+  if (!canManageResourcePermissions(req.user, permission.Resource)) {
+    return res.status(403).json({ message: "No puedes gestionar permisos de este recurso" });
+  }
 
   await permission.destroy();
   await logEvent(req.user.username, "DELETE_PERMISSION", "SUCCESS");
