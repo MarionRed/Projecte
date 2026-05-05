@@ -10,6 +10,12 @@ const router = express.Router();
 
 router.use(authenticate);
 
+function canUseGroupPermissionTarget(actor, group) {
+  if (!actor || !group) return false;
+  if (["admin", "security"].includes(actor.role)) return true;
+  return group.creatorUserId === actor.id || (group.Users || []).some((user) => user.id === actor.id);
+}
+
 router.get("/", async (req, res) => {
   const include = [{ model: Resource }];
   if (!["admin", "security"].includes(req.user.role)) {
@@ -41,9 +47,14 @@ router.post("/", validate(permissionSchema), async (req, res) => {
   const target =
     data.identityType === "user"
       ? await User.findByPk(data.identityId)
-      : await Group.findByPk(data.identityId);
+      : await Group.findByPk(data.identityId, {
+        include: [{ model: User, attributes: ["id"], through: { attributes: [] } }],
+      });
 
   if (!target) return res.status(404).json({ message: "Identidad no encontrada" });
+  if (data.identityType === "group" && !canUseGroupPermissionTarget(req.user, target)) {
+    return res.status(403).json({ message: "No puedes asignar permisos a este grupo" });
+  }
 
   const [permission] = await Permission.findOrCreate({
     where: {

@@ -29,6 +29,7 @@ const User = sequelize.define("User", {
 const Group = sequelize.define("Group", {
   name: { type: DataTypes.STRING, allowNull: false, unique: true },
   description: { type: DataTypes.STRING, allowNull: true },
+  creatorUserId: { type: DataTypes.INTEGER, allowNull: true },
 });
 
 const Resource = sequelize.define("Resource", {
@@ -79,6 +80,9 @@ const UserGroup = sequelize.define("UserGroup", {}, { timestamps: false });
 User.belongsToMany(Group, { through: UserGroup });
 Group.belongsToMany(User, { through: UserGroup });
 
+User.hasMany(Group, { as: "createdGroups", foreignKey: "creatorUserId" });
+Group.belongsTo(User, { as: "creator", foreignKey: "creatorUserId" });
+
 User.hasMany(Resource, { as: "ownedResources", foreignKey: "ownerUserId" });
 Resource.belongsTo(User, { as: "ownerUser", foreignKey: "ownerUserId" });
 
@@ -93,6 +97,18 @@ Permission.belongsTo(Resource, { foreignKey: "resourceId" });
 
 async function logEvent(actor, action, status, details = null) {
   await Log.create({ actor, action, status, details });
+}
+
+async function ensureSchema() {
+  const queryInterface = sequelize.getQueryInterface();
+  const groupsTable = await queryInterface.describeTable("Groups");
+  if (!groupsTable.creatorUserId) {
+    await queryInterface.addColumn("Groups", "creatorUserId", {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      references: { model: "Users", key: "id" },
+    });
+  }
 }
 
 async function seedDemoData() {
@@ -121,13 +137,16 @@ async function seedDemoData() {
 
   const [profesores] = await Group.findOrCreate({
     where: { name: "profesores" },
-    defaults: { description: "Grupo con permisos de gestion academica" },
+    defaults: { description: "Grupo con permisos de gestion academica", creatorUserId: admin.id },
   });
   const [alumnos] = await Group.findOrCreate({
     where: { name: "alumnos" },
     defaults: { description: "Grupo con acceso de lectura" },
   });
 
+  if (!profesores.creatorUserId) {
+    await profesores.update({ creatorUserId: admin.id });
+  }
   await admin.addGroup(profesores);
   await alice.addGroup(alumnos);
 
@@ -192,6 +211,7 @@ module.exports = {
   Permission,
   Log,
   UserGroup,
+  ensureSchema,
   logEvent,
   seedDemoData,
 };

@@ -79,7 +79,7 @@
             <div class="column is-narrow"><button class="button is-primary">Crear</button></div>
           </form>
 
-          <form class="columns" @submit.prevent="assignMember">
+          <form v-if="manageableGroups.length > 0" class="columns" @submit.prevent="assignMember">
             <div class="column">
               <div class="select is-fullwidth">
                 <select v-model.number="membership.userId" required>
@@ -92,7 +92,7 @@
               <div class="select is-fullwidth">
                 <select v-model.number="membership.groupId" required>
                   <option disabled value="">Grupo</option>
-                  <option v-for="group in groups" :key="group.id" :value="group.id">{{ group.name }}</option>
+                  <option v-for="group in manageableGroups" :key="group.id" :value="group.id">{{ group.name }}</option>
                 </select>
               </div>
             </div>
@@ -100,14 +100,28 @@
           </form>
 
           <table class="table is-fullwidth is-striped">
-            <thead><tr><th>ID</th><th>Grupo</th><th>Descripcion</th><th>Miembros</th><th></th></tr></thead>
+            <thead><tr><th>ID</th><th>Grupo</th><th>Creador</th><th>Descripcion</th><th>Miembros</th><th></th></tr></thead>
             <tbody>
               <tr v-for="group in groups" :key="group.id">
                 <td>{{ group.id }}</td>
                 <td>{{ group.name }}</td>
+                <td>{{ group.creator?.username || "-" }}</td>
                 <td>{{ group.description }}</td>
-                <td>{{ (group.Users || []).map((user) => user.username).join(", ") || "-" }}</td>
-                <td><button class="button is-small is-danger is-light" @click="deleteGroup(group)">Borrar</button></td>
+                <td>
+                  <span v-if="(group.Users || []).length === 0">-</span>
+                  <span v-for="member in group.Users || []" :key="member.id" class="tag is-light mr-1 mb-1">
+                    {{ member.username }}
+                    <button
+                      v-if="canManageGroup(group) && canRemoveGroupMember(group, member)"
+                      class="delete is-small ml-1"
+                      type="button"
+                      @click.stop="removeGroupMember(group, member)"
+                    ></button>
+                  </span>
+                </td>
+                <td>
+                  <button v-if="canManageGroup(group)" class="button is-small is-danger is-light" @click="deleteGroup(group)">Borrar</button>
+                </td>
               </tr>
             </tbody>
           </table>
@@ -327,7 +341,7 @@ const canUseSimulator = computed(() => canManageCatalog.value);
 const tabs = computed(() => [
   { key: "overview", label: "Resumen" },
   ...(isAdmin.value ? [{ key: "users", label: "Usuarios" }] : []),
-  ...(canManageCatalog.value ? [{ key: "groups", label: "Grupos" }] : []),
+  { key: "groups", label: "Grupos" },
   { key: "resources", label: "Recursos" },
   ...(canUseSimulator.value ? [{ key: "simulator", label: "Simulador" }] : []),
   { key: "logs", label: "Logs" },
@@ -355,6 +369,7 @@ const persistedResources = computed(() => resources.value.filter((resource) => r
 const permissionTargets = computed(() =>
   permissionForm.identityType === "user" ? users.value : groups.value,
 );
+const manageableGroups = computed(() => groups.value.filter((group) => canManageGroup(group)));
 const selectedPermissions = computed(() =>
   selectedResource.value?.id
     ? permissions.value.filter((permission) => permission.resourceId === selectedResource.value.id)
@@ -413,6 +428,14 @@ function refreshSelected() {
 
 function isProtectedAdmin(user) {
   return user.role === "admin" || user.username === "admin";
+}
+
+function canManageGroup(group) {
+  return canManageCatalog.value || group.creatorUserId === auth.user?.id;
+}
+
+function canRemoveGroupMember(group, member) {
+  return canManageCatalog.value || group.creatorUserId !== member.id;
 }
 
 async function syncResources() {
@@ -510,24 +533,45 @@ async function deleteUser(user) {
 }
 
 async function createGroup() {
-  await http.post("/groups", { ...groupForm });
-  groupForm.name = "";
-  groupForm.description = "";
-  await loadAll();
+  try {
+    await http.post("/groups", { ...groupForm });
+    groupForm.name = "";
+    groupForm.description = "";
+    await loadAll();
+  } catch (err) {
+    message.value = err.response?.data?.message || "No se pudo crear el grupo";
+  }
 }
 
 async function assignMember() {
-  await http.post("/groups/members", { ...membership });
-  membership.userId = "";
-  membership.groupId = "";
-  await loadAll();
+  try {
+    await http.post("/groups/members", { ...membership });
+    membership.userId = "";
+    membership.groupId = "";
+    await loadAll();
+  } catch (err) {
+    message.value = err.response?.data?.message || "No se pudo asignar el usuario al grupo";
+  }
 }
 
 async function deleteGroup(group) {
   const confirmed = window.confirm(`Seguro que quieres borrar el grupo "${group.name}"?`);
   if (!confirmed) return;
-  await http.delete(`/groups/${group.id}`);
-  await loadAll();
+  try {
+    await http.delete(`/groups/${group.id}`);
+    await loadAll();
+  } catch (err) {
+    message.value = err.response?.data?.message || "No se pudo borrar el grupo";
+  }
+}
+
+async function removeGroupMember(group, member) {
+  try {
+    await http.delete(`/groups/${group.id}/members/${member.id}`);
+    await loadAll();
+  } catch (err) {
+    message.value = err.response?.data?.message || "No se pudo quitar el miembro del grupo";
+  }
 }
 
 async function savePermission() {
