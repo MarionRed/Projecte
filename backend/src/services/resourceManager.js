@@ -5,6 +5,7 @@ const { sequelize, Permission, Resource, User, Group } = require("../models");
 const { getEffectiveResourceAccess, requireResourceAccess } = require("./accessControl");
 const {
   createDiskResource,
+  isTextResourcePath,
   joinResourcePath,
   makeRollbackPath,
   metadataForPath,
@@ -24,7 +25,22 @@ function httpError(message, statusCode = 400) {
 }
 
 function canManageCatalog(actor) {
-  return ["admin", "security"].includes(actor?.role);
+  return actor?.role === "admin";
+}
+
+function inferFileType(name, explicitType = null) {
+  if (explicitType) return explicitType;
+  return name.toLowerCase().endsWith(".txt") ? "text/plain" : "application/octet-stream";
+}
+
+function decodeResourceContent(data, resourcePath) {
+  if (data.contentBase64) {
+    return Buffer.from(data.contentBase64, "base64");
+  }
+  if (isTextResourcePath(resourcePath)) {
+    return data.content || "";
+  }
+  return Buffer.from(data.content || "", "utf8");
 }
 
 function parentPathOf(resourcePath) {
@@ -64,6 +80,7 @@ function buildTree(resources) {
     kind: resource.kind,
     fileType: resource.fileType,
     checksum: resource.checksum,
+    isPrivate: resource.isPrivate,
     ownerUser: resource.ownerUser,
     ownerGroup: resource.ownerGroup,
     Permissions: resource.Permissions || [],
@@ -96,7 +113,11 @@ function buildTree(resources) {
 }
 
 async function filterResourcesForActor(resources, actor) {
-  if (!actor || ["admin", "security"].includes(actor.role)) {
+  if (!actor) {
+    return resources;
+  }
+  if (actor.role === "security") return [];
+  if (actor.role === "admin") {
     return resources;
   }
 
@@ -107,12 +128,12 @@ async function filterResourcesForActor(resources, actor) {
 
   return resources.filter((resource) => {
     if (resource.ownerUserId === actor.id) return true;
+    if (resource.isPrivate) return false;
 
     return (resource.Permissions || []).some((permission) => {
       const grantsAccess = permission.canRead || permission.canWrite;
       if (!grantsAccess) return false;
-      if (permission.identityType === "user") return permission.identityId === actor.id;
-      return groupIds.has(permission.identityId);
+      return permission.identityType === "group" && groupIds.has(permission.identityId);
     });
   });
 }
@@ -131,6 +152,7 @@ async function listResourceTree(actor = null) {
   ]);
   const visibleResources = await filterResourcesForActor(resources, actor);
   const diskByPath = new Map(diskItems.map((item) => [item.path, item]));
+  const allResourcesByPath = new Map(resources.map((resource) => [resource.path, resource]));
   const resourcesByPath = new Map(visibleResources.map((resource) => [resource.path, resource]));
 
   const persisted = await Promise.all(visibleResources.map(async (resource) => {
@@ -140,18 +162,19 @@ async function listResourceTree(actor = null) {
     return plain;
   }));
 
-  const unpersisted = actor && !["admin", "security"].includes(actor.role)
+  const unpersisted = actor && actor.role !== "admin"
     ? []
     : diskItems
-      .filter((item) => !resourcesByPath.has(item.path))
+      .filter((item) => !allResourcesByPath.has(item.path))
       .map((item) => ({
         id: null,
         name: item.name,
         path: item.path,
         kind: item.kind,
         parentId: resourcesByPath.get(parentPathOf(item.path))?.id || null,
-        fileType: item.kind === "file" ? "text/plain" : null,
+        fileType: item.kind === "file" ? inferFileType(item.name) : null,
         checksum: item.checksum,
+        isPrivate: false,
         Permissions: [],
         access: { canRead: true, canWrite: true, isOwner: false },
         disk: { ...item, exists: true, persisted: false },
@@ -182,7 +205,7 @@ async function syncFromDisk() {
         path: item.path,
         kind: item.kind,
         parentId: parent?.id || null,
-        fileType: item.kind === "file" ? "text/plain" : null,
+        fileType: item.kind === "file" ? inferFileType(item.name) : null,
         checksum: item.checksum,
       };
 
@@ -227,7 +250,7 @@ async function createResourceWithRollback(data, actor) {
     throw httpError("Ya existe un recurso en esa ruta", 409);
   }
 
-  await createDiskResource(resourcePath, kind, data.content || "");
+  await createDiskResource(resourcePath, kind, decodeResourceContent(data, resourcePath));
 
   try {
     const metadata = await metadataForPath(resourcePath);
@@ -240,7 +263,8 @@ async function createResourceWithRollback(data, actor) {
           parentId: parent?.id || null,
           ownerUserId: canManageCatalog(actor) ? data.ownerUserId || actor.id : actor.id,
           ownerGroupId: canManageCatalog(actor) ? data.ownerGroupId || null : null,
-          fileType: kind === "file" ? data.fileType || "text/plain" : null,
+          isPrivate: !canManageCatalog(actor) && kind === "file",
+          fileType: kind === "file" ? inferFileType(name, data.fileType) : null,
           checksum: metadata.checksum,
         },
         { transaction },
@@ -257,6 +281,9 @@ async function readResourceContent(id, actor) {
   if (resource.kind !== "file") {
     throw httpError("Solo se puede leer el contenido de ficheros");
   }
+  if (!isTextResourcePath(resource.path)) {
+    throw httpError("Solo se puede leer contenido editable de ficheros TXT", 415);
+  }
 
   await requireResourceAccess(actor, resource, "read");
   const content = await readResourceFile(resource.path);
@@ -267,6 +294,9 @@ async function updateResourceContent(id, content, actor) {
   const resource = await getResourceOr404(id);
   if (resource.kind !== "file") {
     throw httpError("Solo se puede editar el contenido de ficheros");
+  }
+  if (!isTextResourcePath(resource.path)) {
+    throw httpError("Solo se pueden editar ficheros TXT", 415);
   }
 
   await requireResourceAccess(actor, resource, "write");
@@ -343,11 +373,11 @@ async function deleteResourceWithRollback(id, actor) {
         transaction,
       });
       const descendantIds = descendants.map((item) => item.id);
+      await Permission.destroy({
+        where: { resourceId: [resource.id, ...descendantIds] },
+        transaction,
+      });
       if (descendantIds.length > 0) {
-        await Permission.destroy({
-          where: { resourceId: descendantIds },
-          transaction,
-        });
         for (const child of descendants.sort((left, right) => right.path.length - left.path.length)) {
           await child.destroy({ transaction });
         }
@@ -362,18 +392,13 @@ async function deleteResourceWithRollback(id, actor) {
 }
 
 async function getPermissionIdentity(permission) {
-  if (permission.identityType === "user") {
-    const user = await User.findByPk(permission.identityId, { attributes: ["id", "username"] });
-    return user ? { id: user.id, name: user.username, type: "user" } : null;
-  }
-
   const group = await Group.findByPk(permission.identityId, { attributes: ["id", "name"] });
   return group ? { id: group.id, name: group.name, type: "group" } : null;
 }
 
 async function listPermissionsForResource(resourceId) {
   const permissions = await Permission.findAll({
-    where: { resourceId },
+    where: { resourceId, identityType: "group" },
     include: [{ model: Resource }],
     order: [["id", "ASC"]],
   });

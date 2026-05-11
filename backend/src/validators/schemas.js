@@ -21,6 +21,14 @@ const loginSchema = z.object({
   }),
 });
 
+const completePasswordResetSchema = z.object({
+  body: z.object({
+    resetToken: z.string().min(1),
+    password: z.string().min(6).max(120),
+    captcha: z.string().optional().default(""),
+  }),
+});
+
 const userUpdateSchema = z.object({
   params: idParam.shape.params,
   body: z.object({
@@ -48,6 +56,7 @@ const resourceSchema = z.object({
     name: z.string().min(1).max(120),
     kind: z.enum(["directory", "file"]),
     content: z.string().max(1024 * 1024).optional().default(""),
+    contentBase64: z.string().max(20 * 1024 * 1024).optional().nullable(),
     fileType: z.string().max(80).optional().nullable(),
     parentId: z.number().int().positive().optional().nullable(),
     ownerUserId: z.number().int().positive().optional().nullable(),
@@ -71,7 +80,7 @@ const resourceContentSchema = z.object({
 
 const permissionSchema = z.object({
   body: z.object({
-    identityType: z.enum(["user", "group"]),
+    identityType: z.enum(["group"]),
     identityId: z.number().int().positive(),
     resourceId: z.number().int().positive(),
     canRead: z.boolean().default(false),
@@ -88,6 +97,7 @@ const accessCheckSchema = z.object({
 });
 
 module.exports = {
+  completePasswordResetSchema,
   idParam,
   registerSchema,
   loginSchema,

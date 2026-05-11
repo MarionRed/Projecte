@@ -10,19 +10,29 @@ const router = express.Router();
 
 router.use(authenticate);
 
+function asyncRoute(handler) {
+  return (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next);
+}
+
 function canUseGroupPermissionTarget(actor, group) {
   if (!actor || !group) return false;
-  if (["admin", "security"].includes(actor.role)) return true;
+  if (actor.role === "admin") return true;
   return group.creatorUserId === actor.id || (group.Users || []).some((user) => user.id === actor.id);
 }
 
-router.get("/", async (req, res) => {
+router.get("/", asyncRoute(async (req, res) => {
+  if (req.user.role === "security") {
+    return res.status(403).json({ message: "Permisos insuficientes" });
+  }
+
   const include = [{ model: Resource }];
-  if (!["admin", "security"].includes(req.user.role)) {
-    include[0].where = { ownerUserId: req.user.id };
+  const where = { identityType: "group" };
+  if (req.user.role !== "admin") {
+    include[0].where = { ownerUserId: req.user.id, isPrivate: false };
   }
 
   const permissions = await Permission.findAll({
+    where,
     include,
     order: [["id", "ASC"]],
   });
@@ -34,25 +44,29 @@ router.get("/", async (req, res) => {
     }),
   );
   res.json({ permissions: enriched });
-});
+}));
 
-router.post("/", validate(permissionSchema), async (req, res) => {
+router.post("/", validate(permissionSchema), asyncRoute(async (req, res) => {
+  if (req.user.role === "security") {
+    return res.status(403).json({ message: "Permisos insuficientes" });
+  }
+
   const data = req.validated.body;
   const resource = await Resource.findByPk(data.resourceId);
   if (!resource) return res.status(404).json({ message: "Recurso no encontrado" });
+  if (resource.isPrivate && req.user.role !== "admin") {
+    return res.status(403).json({ message: "Los recursos privados no se pueden compartir" });
+  }
   if (!canManageResourcePermissions(req.user, resource)) {
     return res.status(403).json({ message: "No puedes gestionar permisos de este recurso" });
   }
 
-  const target =
-    data.identityType === "user"
-      ? await User.findByPk(data.identityId)
-      : await Group.findByPk(data.identityId, {
-        include: [{ model: User, attributes: ["id"], through: { attributes: [] } }],
-      });
+  const target = await Group.findByPk(data.identityId, {
+    include: [{ model: User, attributes: ["id"], through: { attributes: [] } }],
+  });
 
   if (!target) return res.status(404).json({ message: "Identidad no encontrada" });
-  if (data.identityType === "group" && !canUseGroupPermissionTarget(req.user, target)) {
+  if (!canUseGroupPermissionTarget(req.user, target)) {
     return res.status(403).json({ message: "No puedes asignar permisos a este grupo" });
   }
 
@@ -67,29 +81,40 @@ router.post("/", validate(permissionSchema), async (req, res) => {
   await permission.update({ canRead: data.canRead, canWrite: data.canWrite });
   await logEvent(req.user.username, "UPSERT_PERMISSION", "SUCCESS", JSON.stringify(data));
   return res.status(201).json({ permission });
-});
+}));
 
-router.post("/check", validate(accessCheckSchema), async (req, res) => {
+router.post("/check", validate(accessCheckSchema), asyncRoute(async (req, res) => {
+  if (req.user.role === "security") {
+    return res.status(403).json({ message: "Permisos insuficientes" });
+  }
+
   const { userId, resourceId, action } = req.validated.body;
   const result = await explainAccess(userId, resourceId, action);
-  const user = await User.findByPk(userId);
   const resource = await Resource.findByPk(resourceId);
+  const resourceDetail = resource?.isPrivate ? "recurso privado" : resource?.path || resourceId;
 
   await logEvent(
     req.user.username,
     `CHECK_${action.toUpperCase()}`,
     result.allowed ? "ALLOWED" : "DENIED",
-    `${user?.username || userId} -> ${resource?.path || resourceId}: ${result.reason}`,
+    `${userId} -> ${resourceDetail}: ${result.reason}`,
   );
 
   return res.json(result);
-});
+}));
 
-router.delete("/:id", validate(idParam), async (req, res) => {
+router.delete("/:id", validate(idParam), asyncRoute(async (req, res) => {
+  if (req.user.role === "security") {
+    return res.status(403).json({ message: "Permisos insuficientes" });
+  }
+
   const permission = await Permission.findByPk(req.validated.params.id, {
     include: [{ model: Resource }],
   });
   if (!permission) return res.status(404).json({ message: "Permiso no encontrado" });
+  if (permission.identityType !== "group") {
+    return res.status(403).json({ message: "Solo se gestionan permisos de grupo" });
+  }
   if (!canManageResourcePermissions(req.user, permission.Resource)) {
     return res.status(403).json({ message: "No puedes gestionar permisos de este recurso" });
   }
@@ -97,6 +122,6 @@ router.delete("/:id", validate(idParam), async (req, res) => {
   await permission.destroy();
   await logEvent(req.user.username, "DELETE_PERMISSION", "SUCCESS");
   return res.status(204).send();
-});
+}));
 
 module.exports = router;

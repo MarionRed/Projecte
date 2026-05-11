@@ -1,12 +1,13 @@
 const express = require("express");
 const { authenticate } = require("../middleware/auth");
+const { asyncRoute } = require("../middleware/asyncRoute");
 const { Log } = require("../models");
 
 const router = express.Router();
 
 router.use(authenticate);
 
-router.get("/", async (req, res) => {
+router.get("/", asyncRoute(async (req, res) => {
   const query = {
     order: [["createdAt", "DESC"]],
     limit: 200,
@@ -18,6 +19,6 @@ router.get("/", async (req, res) => {
 
   const logs = await Log.findAll(query);
   res.json({ logs });
-});
+}));
 
 module.exports = router;

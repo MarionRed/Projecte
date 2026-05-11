@@ -26,9 +26,9 @@ async function authenticate(req, res, next) {
 }
 
 function requireRole(roles) {
-  return async (req, res, next) => {
+  return (req, res, next) => {
     if (!roles.includes(req.user.role)) {
-      await logEvent(req.user.username, "ACCESS_ROLE_PROTECTED", "DENIED", roles.join(","));
+      logEvent(req.user.username, "ACCESS_ROLE_PROTECTED", "DENIED", roles.join(",")).catch(() => {});
       return res.status(403).json({ message: "Permisos insuficientes" });
     }
 

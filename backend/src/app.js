@@ -24,7 +24,7 @@ if (process.env.CORS_ORIGIN) {
     credentials: true,
   }));
 }
-app.use(express.json({ limit: "1mb" }));
+app.use(express.json({ limit: "25mb" }));
 app.use(cookieParser());
 app.use(
   session({

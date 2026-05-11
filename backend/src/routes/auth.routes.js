@@ -5,23 +5,38 @@ const QRCode = require("qrcode");
 const speakeasy = require("speakeasy");
 const svgCaptcha = require("svg-captcha");
 const { securityConfig } = require("../config/security");
+const { asyncRoute } = require("../middleware/asyncRoute");
 const { validate } = require("../middleware/validate");
 const { authenticate, jwtSecret } = require("../middleware/auth");
-const { registerSchema, loginSchema } = require("../validators/schemas");
+const { completePasswordResetSchema, registerSchema, loginSchema } = require("../validators/schemas");
 const { User, logEvent } = require("../models");
 
 const router = express.Router();
 
 router.get("/captcha", (req, res) => {
   const captcha = svgCaptcha.create({ noise: 2, color: true });
-  req.session.captcha = captcha.text;
+  req.session.captcha = captcha.text.trim().toLowerCase();
+  res.set("Cache-Control", "no-store");
   res.type("svg").send(captcha.data);
 });
 
-router.post("/register", validate(registerSchema), async (req, res) => {
+function captchaMatches(req, submittedCaptcha) {
+  const expectedCaptcha = req.session?.captcha;
+  if (req.session) {
+    delete req.session.captcha;
+  }
+
+  return Boolean(
+    expectedCaptcha
+      && submittedCaptcha
+      && submittedCaptcha.trim().toLowerCase() === expectedCaptcha,
+  );
+}
+
+router.post("/register", validate(registerSchema), asyncRoute(async (req, res) => {
   const { username, password, captcha } = req.validated.body;
 
-  if (securityConfig.captchaEnabled && captcha !== req.session.captcha) {
+  if (securityConfig.captchaEnabled && !captchaMatches(req, captcha)) {
     await logEvent(username, "REGISTER", "CAPTCHA_FAILED");
     return res.status(400).json({ message: "Captcha incorrecto" });
   }
@@ -51,12 +66,12 @@ router.post("/register", validate(registerSchema), async (req, res) => {
     qrCodeUrl,
     manualSecret: secret.base32,
   });
-});
+}));
 
-router.post("/login", validate(loginSchema), async (req, res) => {
+router.post("/login", validate(loginSchema), asyncRoute(async (req, res) => {
   const { username, password, twoFactorCode, captcha } = req.validated.body;
 
-  if (securityConfig.captchaEnabled && captcha !== req.session.captcha) {
+  if (securityConfig.captchaEnabled && !captchaMatches(req, captcha)) {
     await logEvent(username, "LOGIN", "CAPTCHA_FAILED");
     return res.status(400).json({ message: "Captcha incorrecto" });
   }
@@ -87,6 +102,21 @@ router.post("/login", validate(loginSchema), async (req, res) => {
     await user.update({ failedAttempts, blockUntil });
     await logEvent(username, "LOGIN", failedAttempts >= 3 ? "TEMP_BLOCKED" : "FAILED_PASSWORD");
     return res.status(401).json({ message: "Credenciales incorrectas" });
+  }
+
+  if (user.passwordResetRequired) {
+    const resetToken = jwt.sign(
+      { id: user.id, username: user.username, purpose: "password-reset" },
+      jwtSecret,
+      { expiresIn: "15m" },
+    );
+    await user.update({ failedAttempts: 0, blockUntil: null });
+    await logEvent(username, "PASSWORD_RESET_LOGIN", "PENDING");
+    return res.json({
+      passwordResetRequired: true,
+      resetToken,
+      user: { id: user.id, username: user.username, role: user.role },
+    });
   }
 
   if (securityConfig.twoFactorEnabled && user.twoFactorEnabled) {
@@ -121,9 +151,56 @@ router.post("/login", validate(loginSchema), async (req, res) => {
   return res.json({
     user: { id: user.id, username: user.username, role: user.role },
   });
-});
+}));
 
-router.get("/me", authenticate, async (req, res) => {
+router.post("/complete-password-reset", validate(completePasswordResetSchema), asyncRoute(async (req, res) => {
+  const { resetToken, password, captcha } = req.validated.body;
+
+  if (securityConfig.captchaEnabled && !captchaMatches(req, captcha)) {
+    await logEvent("password-reset", "PASSWORD_RESET", "CAPTCHA_FAILED");
+    return res.status(400).json({ message: "Captcha incorrecto" });
+  }
+
+  let payload;
+  try {
+    payload = jwt.verify(resetToken, jwtSecret);
+  } catch (err) {
+    return res.status(401).json({ message: "Token de recuperacion caducado o no valido" });
+  }
+
+  if (payload.purpose !== "password-reset") {
+    return res.status(401).json({ message: "Token de recuperacion no valido" });
+  }
+
+  const user = await User.findByPk(payload.id);
+  if (!user || !user.passwordResetRequired) {
+    return res.status(404).json({ message: "Solicitud de recuperacion no encontrada" });
+  }
+
+  const secret = speakeasy.generateSecret({
+    name: `Control de Accesos (${user.username})`,
+    length: 20,
+  });
+
+  await user.update({
+    passwordHash: await argon2.hash(password),
+    passwordResetRequired: false,
+    failedAttempts: 0,
+    blockUntil: null,
+    twoFactorSecret: secret.base32,
+    twoFactorEnabled: securityConfig.twoFactorEnabled,
+  });
+
+  const qrCodeUrl = await QRCode.toDataURL(secret.otpauth_url);
+  await logEvent(user.username, "PASSWORD_RESET", "COMPLETED");
+  return res.json({
+    message: "Contrasena actualizada",
+    qrCodeUrl: securityConfig.twoFactorEnabled ? qrCodeUrl : null,
+    manualSecret: securityConfig.twoFactorEnabled ? secret.base32 : null,
+  });
+}));
+
+router.get("/me", authenticate, asyncRoute(async (req, res) => {
   return res.json({
     user: {
       id: req.user.id,
@@ -132,12 +209,29 @@ router.get("/me", authenticate, async (req, res) => {
       isActive: req.user.isActive,
     },
   });
-});
+}));
 
-router.post("/logout", authenticate, async (req, res) => {
-  await logEvent(req.user.username, "LOGOUT", "SUCCESS");
+router.post("/logout", asyncRoute(async (req, res) => {
+  let user = null;
+  const token = req.cookies?.token;
+  if (token) {
+    try {
+      const payload = jwt.verify(token, jwtSecret);
+      user = await User.findByPk(payload.id);
+    } catch (err) {
+      user = null;
+    }
+  }
+
+  if (user) {
+    await logEvent(user.username, "LOGOUT", "SUCCESS");
+  }
   res.clearCookie("token");
+  res.clearCookie("connect.sid");
+  if (req.session) {
+    req.session.destroy(() => {});
+  }
   return res.json({ message: "Sesion cerrada" });
-});
+}));
 
 module.exports = router;

@@ -20,6 +20,10 @@ function refresh() {
 }
 
 async function logout() {
-  await auth.logout();
+  try {
+    await auth.logout();
+  } catch (err) {
+    auth.user = null;
+  }
 }
 </script>

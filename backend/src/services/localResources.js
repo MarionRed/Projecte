@@ -4,6 +4,7 @@ const path = require("path");
 
 const RESOURCE_ROOT = path.resolve(process.env.RESOURCE_ROOT || "./.resources");
 const ROLLBACK_DIR = ".accessguard-rollback";
+const TEXT_ENCRYPTION_MARKER = "ACCESSGUARD_ENC_V1:";
 
 function httpError(message, statusCode = 400) {
   return Object.assign(new Error(message), { statusCode });
@@ -114,6 +115,50 @@ async function checksumFile(finalPath) {
   return crypto.createHash("sha256").update(content).digest("hex");
 }
 
+function isTextResourcePath(resourcePath) {
+  return path.extname(toResourcePath(resourcePath)).toLowerCase() === ".txt";
+}
+
+function encryptionKey() {
+  const secret = process.env.FILE_ENCRYPTION_KEY
+    || process.env.JWT_SECRET
+    || process.env.SESSION_SECRET
+    || "iam_clase_file_secret";
+  return crypto.createHash("sha256").update(secret).digest();
+}
+
+function encryptText(content) {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", encryptionKey(), iv);
+  const encrypted = Buffer.concat([
+    cipher.update(String(content ?? ""), "utf8"),
+    cipher.final(),
+  ]);
+  const tag = cipher.getAuthTag();
+  return `${TEXT_ENCRYPTION_MARKER}${Buffer.concat([iv, tag, encrypted]).toString("base64")}`;
+}
+
+function decryptText(content) {
+  if (!content.startsWith(TEXT_ENCRYPTION_MARKER)) {
+    return content;
+  }
+
+  const payload = Buffer.from(content.slice(TEXT_ENCRYPTION_MARKER.length), "base64");
+  const iv = payload.subarray(0, 12);
+  const tag = payload.subarray(12, 28);
+  const encrypted = payload.subarray(28);
+  const decipher = crypto.createDecipheriv("aes-256-gcm", encryptionKey(), iv);
+  decipher.setAuthTag(tag);
+  return Buffer.concat([decipher.update(encrypted), decipher.final()]).toString("utf8");
+}
+
+function contentForWrite(resourcePath, content) {
+  if (isTextResourcePath(resourcePath)) {
+    return encryptText(Buffer.isBuffer(content) ? content.toString("utf8") : content);
+  }
+  return Buffer.isBuffer(content) ? content : Buffer.from(String(content ?? ""), "utf8");
+}
+
 async function metadataForPath(resourcePath) {
   const finalPath = resolveResourcePath(resourcePath);
   const stats = await fs.stat(finalPath);
@@ -163,13 +208,16 @@ async function scanDiskResources() {
 async function readResourceFile(resourcePath) {
   await ensureResourceRoot();
   const finalPath = resolveResourcePath(resourcePath);
-  return fs.readFile(finalPath, "utf8");
+  if (isTextResourcePath(resourcePath)) {
+    return decryptText(await fs.readFile(finalPath, "utf8"));
+  }
+  return fs.readFile(finalPath);
 }
 
 async function writeResourceFile(resourcePath, content, flag = "w") {
   await ensureResourceRoot();
   const finalPath = resolveResourcePath(resourcePath);
-  await fs.writeFile(finalPath, content ?? "", { encoding: "utf8", flag });
+  await fs.writeFile(finalPath, contentForWrite(resourcePath, content), { flag });
 }
 
 async function createDiskResource(resourcePath, kind, content = "") {
@@ -181,7 +229,7 @@ async function createDiskResource(resourcePath, kind, content = "") {
     return;
   }
 
-  await fs.writeFile(finalPath, content ?? "", { encoding: "utf8", flag: "wx" });
+  await fs.writeFile(finalPath, contentForWrite(resourcePath, content), { flag: "wx" });
 }
 
 async function moveDiskResource(sourcePath, targetPath) {
@@ -206,6 +254,7 @@ module.exports = {
   checksumFile,
   createDiskResource,
   ensureResourceRoot,
+  isTextResourcePath,
   joinResourcePath,
   makeRollbackPath,
   metadataForPath,

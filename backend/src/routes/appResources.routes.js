@@ -21,7 +21,7 @@ const contentSchema = z.object({
 router.use(authenticate);
 
 function canReadFiles(role) {
-  return role === "admin" || role === "security";
+  return role === "admin";
 }
 
 function canWriteFiles(role) {

@@ -17,11 +17,17 @@ export const useAuthStore = defineStore("auth", {
     },
     async login(payload) {
       const { data } = await http.post("/auth/login", payload);
-      this.user = data.user;
+      if (!data.passwordResetRequired) {
+        this.user = data.user;
+      }
+      return data;
     },
     async logout() {
-      await http.post("/auth/logout");
-      this.user = null;
+      try {
+        await http.post("/auth/logout");
+      } finally {
+        this.user = null;
+      }
     },
   },
 });

@@ -1,16 +1,17 @@
 const express = require("express");
 const { Op } = require("sequelize");
 const { authenticate } = require("../middleware/auth");
+const { asyncRoute } = require("../middleware/asyncRoute");
 const { validate } = require("../middleware/validate");
 const { groupSchema, membershipSchema, idParam } = require("../validators/schemas");
-const { sequelize, Group, User, UserGroup, logEvent } = require("../models");
+const { sequelize, Group, User, Resource, Permission, UserGroup, logEvent } = require("../models");
 
 const router = express.Router();
 
 router.use(authenticate);
 
 function canManageGroup(actor, group) {
-  return ["admin", "security"].includes(actor.role) || group.creatorUserId === actor.id;
+  return actor.role === "admin" || (actor.role !== "security" && group.creatorUserId === actor.id);
 }
 
 function groupIncludes() {
@@ -20,13 +21,17 @@ function groupIncludes() {
   ];
 }
 
-router.get("/", async (req, res) => {
+router.get("/", asyncRoute(async (req, res) => {
+  if (req.user.role === "security") {
+    return res.status(403).json({ message: "Permisos insuficientes" });
+  }
+
   const query = {
     include: groupIncludes(),
     order: [["id", "ASC"]],
   };
 
-  if (!["admin", "security"].includes(req.user.role)) {
+  if (req.user.role !== "admin") {
     const memberships = await UserGroup.findAll({
       where: { UserId: req.user.id },
       attributes: ["GroupId"],
@@ -45,9 +50,13 @@ router.get("/", async (req, res) => {
     ...query,
   });
   res.json({ groups });
-});
+}));
 
-router.post("/", validate(groupSchema), async (req, res) => {
+router.post("/", validate(groupSchema), asyncRoute(async (req, res) => {
+  if (req.user.role === "security") {
+    return res.status(403).json({ message: "Permisos insuficientes" });
+  }
+
   const group = await sequelize.transaction(async (transaction) => {
     const created = await Group.create(
       { ...req.validated.body, creatorUserId: req.user.id },
@@ -60,9 +69,9 @@ router.post("/", validate(groupSchema), async (req, res) => {
   await logEvent(req.user.username, "CREATE_GROUP", "SUCCESS", group.name);
   const createdGroup = await Group.findByPk(group.id, { include: groupIncludes() });
   res.status(201).json({ group: createdGroup });
-});
+}));
 
-router.post("/members", validate(membershipSchema), async (req, res) => {
+router.post("/members", validate(membershipSchema), asyncRoute(async (req, res) => {
   const { userId, groupId } = req.validated.body;
   const user = await User.findByPk(userId);
   const group = await Group.findByPk(groupId, { include: groupIncludes() });
@@ -77,9 +86,9 @@ router.post("/members", validate(membershipSchema), async (req, res) => {
   await group.addUser(user);
   await logEvent(req.user.username, "ADD_GROUP_MEMBER", "SUCCESS", `${user.username} -> ${group.name}`);
   return res.json({ message: "Usuario asignado al grupo" });
-});
+}));
 
-router.delete("/:groupId/members/:userId", async (req, res) => {
+router.delete("/:groupId/members/:userId", asyncRoute(async (req, res) => {
   const groupId = Number(req.params.groupId);
   const userId = Number(req.params.userId);
   if (!Number.isInteger(groupId) || groupId <= 0 || !Number.isInteger(userId) || userId <= 0) {
@@ -94,25 +103,31 @@ router.delete("/:groupId/members/:userId", async (req, res) => {
   if (!canManageGroup(req.user, group)) {
     return res.status(403).json({ message: "No puedes gestionar miembros de este grupo" });
   }
-  if (!["admin", "security"].includes(req.user.role) && group.creatorUserId === req.user.id && user.id === req.user.id) {
+  if (req.user.role !== "admin" && group.creatorUserId === req.user.id && user.id === req.user.id) {
     return res.status(403).json({ message: "El creador no puede quitarse de su propio grupo" });
   }
 
   await group.removeUser(user);
   await logEvent(req.user.username, "REMOVE_GROUP_MEMBER", "SUCCESS", `${user.username} -/-> ${group.name}`);
   return res.status(204).send();
-});
+}));
 
-router.delete("/:id", validate(idParam), async (req, res) => {
+router.delete("/:id", validate(idParam), asyncRoute(async (req, res) => {
   const group = await Group.findByPk(req.validated.params.id);
   if (!group) return res.status(404).json({ message: "Grupo no encontrado" });
   if (!canManageGroup(req.user, group)) {
     return res.status(403).json({ message: "No puedes borrar este grupo" });
   }
 
-  await group.destroy();
+  await sequelize.transaction(async (transaction) => {
+    await UserGroup.destroy({ where: { GroupId: group.id }, transaction });
+    await Permission.destroy({ where: { identityType: "group", identityId: group.id }, transaction });
+    await Resource.update({ ownerGroupId: null }, { where: { ownerGroupId: group.id }, transaction });
+    await group.destroy({ transaction });
+  });
+
   await logEvent(req.user.username, "DELETE_GROUP", "SUCCESS", group.name);
   return res.status(204).send();
-});
+}));
 
 module.exports = router;

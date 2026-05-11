@@ -8,7 +8,8 @@ function permissionAllows(permission, action) {
 
 function canManageResourcePermissions(actor, resource) {
   if (!actor || !resource) return false;
-  return ["admin", "security"].includes(actor.role) || resource.ownerUserId === actor.id;
+  if (resource.ownerUserId === actor.id) return true;
+  return actor.role === "admin";
 }
 
 async function explainAccess(userId, resourceId, action) {
@@ -21,21 +22,16 @@ async function explainAccess(userId, resourceId, action) {
     return { allowed: false, reason: "Usuario o recurso no encontrado" };
   }
 
-  if (["admin", "security"].includes(user.role)) {
-    return { allowed: true, reason: `El rol ${user.role} tiene acceso completo` };
+  if (user.role === "admin") {
+    return { allowed: true, reason: "El rol admin tiene acceso completo" };
+  }
+
+  if (resource.isPrivate && resource.ownerUserId !== user.id) {
+    return { allowed: false, reason: "El recurso es privado del propietario" };
   }
 
   if (resource.ownerUserId === user.id) {
     return { allowed: true, reason: "El usuario es propietario del recurso" };
-  }
-
-  const userPermissions = await Permission.findAll({
-    where: { identityType: "user", identityId: user.id, resourceId: resource.id },
-  });
-  const userPermission = userPermissions.find((permission) => permissionAllows(permission, action));
-
-  if (userPermission) {
-    return { allowed: true, reason: `Permiso directo de usuario para ${action} en ${resource.path}` };
   }
 
   const groupIds = user.Groups.map((group) => group.id);

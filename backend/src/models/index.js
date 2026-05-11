@@ -24,6 +24,11 @@ const User = sequelize.define("User", {
     defaultValue: 0,
   },
   blockUntil: { type: DataTypes.DATE, allowNull: true },
+  passwordResetRequired: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: false,
+  },
 });
 
 const Group = sequelize.define("Group", {
@@ -41,6 +46,7 @@ const Resource = sequelize.define("Resource", {
   },
   fileType: { type: DataTypes.STRING, allowNull: true },
   checksum: { type: DataTypes.STRING, allowNull: true },
+  isPrivate: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
 });
 
 const Permission = sequelize.define(
@@ -107,6 +113,24 @@ async function ensureSchema() {
       type: DataTypes.INTEGER,
       allowNull: true,
       references: { model: "Users", key: "id" },
+    });
+  }
+
+  const resourcesTable = await queryInterface.describeTable("Resources");
+  if (!resourcesTable.isPrivate) {
+    await queryInterface.addColumn("Resources", "isPrivate", {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+    });
+  }
+
+  const usersTable = await queryInterface.describeTable("Users");
+  if (!usersTable.passwordResetRequired) {
+    await queryInterface.addColumn("Users", "passwordResetRequired", {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
     });
   }
 }

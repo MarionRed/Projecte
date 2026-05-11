@@ -12,7 +12,7 @@
           Usuario administrador: <strong>admin</strong> / <strong>Admin123!</strong>.
         </div>
 
-        <form @submit.prevent="submitLogin">
+        <form v-if="!passwordReset.pending" @submit.prevent="submitLogin">
           <div class="field">
             <label class="label">Usuario</label>
             <input v-model="login.username" class="input" autocomplete="username" required />
@@ -28,6 +28,27 @@
           <CaptchaField v-if="security.captchaOr2fa" v-model="login.captcha" :refresh-key="captchaRefresh" />
           <button class="button is-primary is-fullwidth" :class="{ 'is-loading': loading }">Entrar</button>
         </form>
+
+        <form v-else @submit.prevent="completePasswordReset">
+          <div class="notification is-info is-light">
+            Introduce una nueva contrasena para completar la recuperacion de la cuenta.
+          </div>
+          <div class="field">
+            <label class="label">Nueva contrasena</label>
+            <input v-model="passwordReset.password" class="input" type="password" autocomplete="new-password" required />
+          </div>
+          <CaptchaField v-if="security.captchaOr2fa" v-model="passwordReset.captcha" :refresh-key="captchaRefresh" />
+          <div class="buttons">
+            <button class="button is-primary" :class="{ 'is-loading': loading }">Actualizar</button>
+            <button class="button is-light" type="button" @click="cancelPasswordReset">Cancelar</button>
+          </div>
+        </form>
+
+        <div v-if="passwordReset.qrCodeUrl" class="mt-4">
+          <p class="has-text-weight-semibold">Nuevo QR 2FA</p>
+          <img :src="passwordReset.qrCodeUrl" alt="QR 2FA" width="180" height="180" />
+          <p class="is-size-7">Clave manual: <code>{{ passwordReset.manualSecret }}</code></p>
+        </div>
       </section>
 
       <section class="panel-box">
@@ -71,7 +92,7 @@ const loading = ref(false);
 const message = ref("");
 const captchaRefresh = ref(0);
 const registration = reactive({ qrCodeUrl: "", manualSecret: "" });
-const security = reactive({ captchaOr2fa: false });
+const security = reactive({ captchaOr2fa: true });
 
 const login = reactive({
   username: "admin",
@@ -86,17 +107,33 @@ const register = reactive({
   captcha: "",
 });
 
+const passwordReset = reactive({
+  pending: false,
+  resetToken: "",
+  password: "",
+  captcha: "",
+  qrCodeUrl: "",
+  manualSecret: "",
+});
+
 function resetCaptcha() {
   captchaRefresh.value += 1;
   login.captcha = "";
   register.captcha = "";
+  passwordReset.captcha = "";
 }
 
 async function submitLogin() {
   loading.value = true;
   message.value = "";
   try {
-    await auth.login({ ...login });
+    const data = await auth.login({ ...login });
+    if (data.passwordResetRequired) {
+      passwordReset.pending = true;
+      passwordReset.resetToken = data.resetToken;
+      resetCaptcha();
+      return;
+    }
     emit("logged-in");
   } catch (err) {
     message.value = err.response?.data?.message || "No se pudo iniciar sesion";
@@ -104,6 +141,41 @@ async function submitLogin() {
   } finally {
     loading.value = false;
   }
+}
+
+async function completePasswordReset() {
+  loading.value = true;
+  message.value = "";
+  try {
+    const { data } = await http.post("/auth/complete-password-reset", {
+      resetToken: passwordReset.resetToken,
+      password: passwordReset.password,
+      captcha: passwordReset.captcha,
+    });
+    passwordReset.pending = false;
+    passwordReset.password = "";
+    passwordReset.resetToken = "";
+    passwordReset.qrCodeUrl = data.qrCodeUrl || "";
+    passwordReset.manualSecret = data.manualSecret || "";
+    login.password = "";
+    login.twoFactorCode = "";
+    message.value = "Contrasena actualizada. Inicia sesion con la nueva contrasena.";
+    resetCaptcha();
+  } catch (err) {
+    message.value = err.response?.data?.message || "No se pudo completar la recuperacion";
+    resetCaptcha();
+  } finally {
+    loading.value = false;
+  }
+}
+
+function cancelPasswordReset() {
+  passwordReset.pending = false;
+  passwordReset.resetToken = "";
+  passwordReset.password = "";
+  passwordReset.qrCodeUrl = "";
+  passwordReset.manualSecret = "";
+  resetCaptcha();
 }
 
 async function submitRegister() {

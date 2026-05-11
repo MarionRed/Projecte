@@ -36,6 +36,25 @@
             Gestiona identidades, grupos y permisos sobre la estructura real de
             <code>{{ resourceRoot }}</code>.
           </p>
+
+          <div v-if="isSecurity" class="mt-5">
+            <h2 class="title is-5">Recuperacion de contrasenas</h2>
+            <table class="table is-fullwidth is-striped">
+              <thead><tr><th>Usuario</th><th>Estado</th><th>Intentos</th><th></th></tr></thead>
+              <tbody>
+                <tr v-for="user in users" :key="user.id">
+                  <td>{{ user.username }}</td>
+                  <td>{{ user.passwordResetRequired ? "pendiente" : (user.isActive ? "activa" : "desactivada") }}</td>
+                  <td>{{ user.failedAttempts }}</td>
+                  <td><button class="button is-small is-warning is-light" @click="requestPasswordReset(user)">Recuperar</button></td>
+                </tr>
+              </tbody>
+            </table>
+            <div v-if="temporaryPassword" class="notification is-info is-light">
+              Contrasena temporal para <strong>{{ temporaryPassword.username }}</strong>:
+              <code>{{ temporaryPassword.value }}</code>
+            </div>
+          </div>
         </section>
 
         <section v-if="activeTab === 'users'" class="panel-box">
@@ -149,6 +168,10 @@
                 <div class="field">
                   <input v-model="resourceForm.name" class="input" placeholder="nombre" required />
                 </div>
+                <div v-if="resourceForm.kind === 'file'" class="field">
+                  <input class="input" type="file" @change="selectUploadFile" />
+                  <p class="help">Se puede subir cualquier formato. Solo los TXT se editan desde la aplicacion.</p>
+                </div>
                 <div class="field has-addons">
                   <p class="control is-expanded">
                     <span class="select is-fullwidth">
@@ -204,10 +227,13 @@
                       <p class="control"><button class="button is-link">Renombrar</button></p>
                     </form>
 
-                    <div v-if="selectedResource.kind === 'file'" class="field">
+                    <div v-if="selectedResource.kind === 'file' && isSelectedTextFile" class="field">
                       <label class="label">Contenido</label>
                       <textarea v-model="fileContent" class="textarea local-file-editor" :readonly="!canWriteSelectedResource"></textarea>
                       <button v-if="canWriteSelectedResource" class="button is-primary mt-2" @click="saveContent">Guardar contenido</button>
+                    </div>
+                    <div v-else-if="selectedResource.kind === 'file'" class="notification is-info is-light">
+                      Este fichero no es TXT. Puedes almacenarlo, renombrarlo o eliminarlo si tienes escritura, pero no editar su contenido desde la aplicacion.
                     </div>
                   </div>
 
@@ -216,8 +242,7 @@
                     <form class="resource-permission-form" @submit.prevent="savePermission">
                       <div class="field">
                         <div class="select is-fullwidth">
-                          <select v-model="permissionForm.identityType" @change="permissionForm.identityId = ''">
-                            <option value="user">usuario</option>
+                          <select v-model="permissionForm.identityType" disabled>
                             <option value="group">grupo</option>
                           </select>
                         </div>
@@ -334,22 +359,29 @@ const accessResult = ref(null);
 const selectedResource = ref(null);
 const fileContent = ref("");
 const resourceRoot = ref("");
+const temporaryPassword = ref(null);
 
 const isAdmin = computed(() => auth.user?.role === "admin");
-const canManageCatalog = computed(() => ["admin", "security"].includes(auth.user?.role));
-const canUseSimulator = computed(() => canManageCatalog.value);
+const isSecurity = computed(() => auth.user?.role === "security");
+const canManageCatalog = computed(() => auth.user?.role === "admin");
+const canUseSimulator = computed(() => isAdmin.value);
 const tabs = computed(() => [
   { key: "overview", label: "Resumen" },
   ...(isAdmin.value ? [{ key: "users", label: "Usuarios" }] : []),
-  { key: "groups", label: "Grupos" },
-  { key: "resources", label: "Recursos" },
+  ...(!isSecurity.value ? [{ key: "groups", label: "Grupos" }] : []),
+  ...(!isSecurity.value ? [{ key: "resources", label: "Recursos" }] : []),
   ...(canUseSimulator.value ? [{ key: "simulator", label: "Simulador" }] : []),
   { key: "logs", label: "Logs" },
 ]);
 
 const groupForm = reactive({ name: "", description: "" });
 const membership = reactive({ userId: "", groupId: "" });
-const resourceForm = reactive({ name: "", kind: "file" });
+const resourceForm = reactive({
+  name: "",
+  kind: "file",
+  fileType: "",
+  contentBase64: "",
+});
 const renameForm = reactive({ name: "" });
 const permissionForm = reactive({
   identityType: "group",
@@ -366,9 +398,7 @@ const sortedResources = computed(() =>
   }),
 );
 const persistedResources = computed(() => resources.value.filter((resource) => resource.id));
-const permissionTargets = computed(() =>
-  permissionForm.identityType === "user" ? users.value : groups.value,
-);
+const permissionTargets = computed(() => groups.value);
 const manageableGroups = computed(() => groups.value.filter((group) => canManageGroup(group)));
 const selectedPermissions = computed(() =>
   selectedResource.value?.id
@@ -386,28 +416,43 @@ const canCreateResource = computed(() => canManageCatalog.value || !!createParen
 const canWriteSelectedResource = computed(
   () => canManageCatalog.value || !!selectedResource.value?.access?.canWrite,
 );
+const isSelectedTextFile = computed(() => isTextFile(selectedResource.value));
 const canManageSelectedPermissions = computed(
-  () => canManageCatalog.value || !!selectedResource.value?.access?.isOwner,
+  () => (!selectedResource.value?.isPrivate || isAdmin.value) && (canManageCatalog.value || !!selectedResource.value?.access?.isOwner),
 );
 
 async function loadAll() {
   message.value = "";
   try {
-    const requests = [
-      http.get("/resources"),
-      http.get("/logs"),
-      http.get("/users"),
-      http.get("/groups"),
-      http.get("/permissions"),
-    ];
+    const logsRequest = http.get("/logs");
+    const dataRequests = isSecurity.value
+      ? [http.get("/users")]
+      : [
+        http.get("/resources"),
+        http.get("/users"),
+        http.get("/groups"),
+        http.get("/permissions"),
+      ];
 
-    const [resourcesRes, logsRes, usersRes, groupsRes, permissionsRes] = await Promise.all(requests);
-    resources.value = resourcesRes.data.resources;
-    resourceRoot.value = resourcesRes.data.root;
+    const [logsRes, firstDataRes, usersRes, groupsRes, permissionsRes] = await Promise.all([
+      logsRequest,
+      ...dataRequests,
+    ]);
     logs.value = logsRes.data.logs;
-    users.value = usersRes.data.users;
-    groups.value = groupsRes.data.groups;
-    permissions.value = permissionsRes.data.permissions;
+
+    if (isSecurity.value) {
+      resources.value = [];
+      resourceRoot.value = "";
+      users.value = firstDataRes.data.users;
+      groups.value = [];
+      permissions.value = [];
+    } else {
+      resources.value = firstDataRes.data.resources;
+      resourceRoot.value = firstDataRes.data.root;
+      users.value = usersRes.data.users;
+      groups.value = groupsRes.data.groups;
+      permissions.value = permissionsRes.data.permissions;
+    }
 
     if (!tabs.value.some((tab) => tab.key === activeTab.value)) {
       activeTab.value = "overview";
@@ -451,7 +496,7 @@ async function selectResource(resource) {
   selectedResource.value = resource;
   renameForm.name = resource.name;
   fileContent.value = "";
-  if (resource.id && resource.kind === "file") {
+  if (resource.id && resource.kind === "file" && isTextFile(resource)) {
     try {
       const { data } = await http.get(`/resources/${resource.id}/content`);
       fileContent.value = data.content;
@@ -459,6 +504,36 @@ async function selectResource(resource) {
       message.value = err.response?.data?.message || "No se pudo leer el fichero";
     }
   }
+}
+
+function isTextFile(resource) {
+  if (!resource || resource.kind !== "file") return false;
+  return resource.fileType === "text/plain" || resource.name?.toLowerCase().endsWith(".txt");
+}
+
+function readFileAsBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = String(reader.result || "");
+      resolve(result.includes(",") ? result.split(",").pop() : result);
+    };
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
+async function selectUploadFile(event) {
+  const [file] = event.target.files || [];
+  if (!file) {
+    resourceForm.fileType = "";
+    resourceForm.contentBase64 = "";
+    return;
+  }
+
+  resourceForm.name = resourceForm.name || file.name;
+  resourceForm.fileType = file.type || "application/octet-stream";
+  resourceForm.contentBase64 = await readFileAsBase64(file);
 }
 
 async function createResource() {
@@ -469,9 +544,13 @@ async function createResource() {
       name: resourceForm.name,
       kind: resourceForm.kind,
       parentId: createParent.value?.id || null,
+      fileType: resourceForm.kind === "file" ? resourceForm.fileType || null : null,
+      contentBase64: resourceForm.kind === "file" ? resourceForm.contentBase64 || null : null,
       content: "",
     });
     resourceForm.name = "";
+    resourceForm.fileType = "";
+    resourceForm.contentBase64 = "";
     await loadAll();
   } catch (err) {
     message.value = err.response?.data?.message || "No se pudo crear el recurso";
@@ -489,12 +568,22 @@ async function renameSelectedResource() {
 }
 
 async function saveContent() {
-  if (!selectedResource.value?.id) return;
+  if (!selectedResource.value?.id || !isSelectedTextFile.value) return;
   try {
     await http.put(`/resources/${selectedResource.value.id}/content`, { content: fileContent.value });
     await loadAll();
   } catch (err) {
     message.value = err.response?.data?.message || "No se pudo guardar el contenido";
+  }
+}
+
+async function requestPasswordReset(user) {
+  try {
+    const { data } = await http.post(`/users/${user.id}/password-reset`);
+    temporaryPassword.value = { username: user.username, value: data.temporaryPassword };
+    await loadAll();
+  } catch (err) {
+    message.value = err.response?.data?.message || "No se pudo generar la recuperacion";
   }
 }
 
@@ -528,8 +617,12 @@ async function deleteUser(user) {
   if (isProtectedAdmin(user)) return;
   const confirmed = window.confirm(`Seguro que quieres borrar el usuario "${user.username}"?`);
   if (!confirmed) return;
-  await http.delete(`/users/${user.id}`);
-  await loadAll();
+  try {
+    await http.delete(`/users/${user.id}`);
+    await loadAll();
+  } catch (err) {
+    message.value = err.response?.data?.message || "No se pudo borrar el usuario";
+  }
 }
 
 async function createGroup() {
@@ -576,17 +669,28 @@ async function removeGroupMember(group, member) {
 
 async function savePermission() {
   if (!selectedResource.value?.id) return;
-  await http.post("/permissions", {
-    ...permissionForm,
-    resourceId: selectedResource.value.id,
-  });
-  permissionForm.identityId = "";
-  await loadAll();
+  try {
+    await http.post("/permissions", {
+      identityType: "group",
+      identityId: permissionForm.identityId,
+      canRead: permissionForm.canRead,
+      canWrite: permissionForm.canWrite,
+      resourceId: selectedResource.value.id,
+    });
+    permissionForm.identityId = "";
+    await loadAll();
+  } catch (err) {
+    message.value = err.response?.data?.message || "No se pudo guardar el permiso";
+  }
 }
 
 async function deletePermission(permission) {
-  await http.delete(`/permissions/${permission.id}`);
-  await loadAll();
+  try {
+    await http.delete(`/permissions/${permission.id}`);
+    await loadAll();
+  } catch (err) {
+    message.value = err.response?.data?.message || "No se pudo borrar el permiso";
+  }
 }
 
 async function checkAccess() {
