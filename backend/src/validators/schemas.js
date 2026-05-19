@@ -61,6 +61,7 @@ const resourceSchema = z.object({
     parentId: z.number().int().positive().optional().nullable(),
     ownerUserId: z.number().int().positive().optional().nullable(),
     ownerGroupId: z.number().int().positive().optional().nullable(),
+    sharedGroupIds: z.array(z.number().int().positive()).max(50).optional().default([]),
   }),
 });
 

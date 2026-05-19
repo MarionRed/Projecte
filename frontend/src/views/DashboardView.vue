@@ -172,6 +172,18 @@
                   <input class="input" type="file" @change="selectUploadFile" />
                   <p class="help">Se puede subir cualquier formato. Solo los TXT se editan desde la aplicacion.</p>
                 </div>
+                <div v-if="!isAdmin && shareableGroups.length > 0" class="field">
+                  <label class="label">Compartir acceso con</label>
+                  <label
+                    v-for="group in shareableGroups"
+                    :key="group.id"
+                    class="checkbox resource-share-option"
+                  >
+                    <input v-model="resourceForm.sharedGroupIds" type="checkbox" :value="group.id" />
+                    {{ group.name }}
+                  </label>
+                  <p class="help">Los grupos seleccionados tendran lectura y escritura. Si no eliges ninguno, solo tu y admin podreis verlo.</p>
+                </div>
                 <div class="field has-addons">
                   <p class="control is-expanded">
                     <span class="select is-fullwidth">
@@ -381,6 +393,7 @@ const resourceForm = reactive({
   kind: "file",
   fileType: "",
   contentBase64: "",
+  sharedGroupIds: [],
 });
 const renameForm = reactive({ name: "" });
 const permissionForm = reactive({
@@ -399,6 +412,12 @@ const sortedResources = computed(() =>
 );
 const persistedResources = computed(() => resources.value.filter((resource) => resource.id));
 const permissionTargets = computed(() => groups.value);
+const shareableGroups = computed(() => {
+  if (isAdmin.value) return [];
+  return groups.value.filter((group) =>
+    (group.Users || []).some((member) => member.id === auth.user?.id),
+  );
+});
 const manageableGroups = computed(() => groups.value.filter((group) => canManageGroup(group)));
 const selectedPermissions = computed(() =>
   selectedResource.value?.id
@@ -546,11 +565,13 @@ async function createResource() {
       parentId: createParent.value?.id || null,
       fileType: resourceForm.kind === "file" ? resourceForm.fileType || null : null,
       contentBase64: resourceForm.kind === "file" ? resourceForm.contentBase64 || null : null,
+      sharedGroupIds: [...resourceForm.sharedGroupIds],
       content: "",
     });
     resourceForm.name = "";
     resourceForm.fileType = "";
     resourceForm.contentBase64 = "";
+    resourceForm.sharedGroupIds = [];
     await loadAll();
   } catch (err) {
     message.value = err.response?.data?.message || "No se pudo crear el recurso";

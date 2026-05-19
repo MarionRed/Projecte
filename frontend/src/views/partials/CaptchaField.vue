@@ -1,9 +1,9 @@
 <template>
   <div class="field">
     <label class="label">Captcha</label>
-    <div class="is-flex is-align-items-center" style="gap: 0.75rem">
-      <button type="button" class="button is-light" @click="reload">
-        <img :src="captchaUrl" alt="Captcha" style="height: 38px" />
+    <div class="is-flex is-align-items-center captcha-field">
+      <button type="button" class="button is-light captcha-button" @click="reload">
+        <img :src="captchaUrl" alt="Captcha" class="captcha-image" />
       </button>
       <input
         :value="modelValue"
@@ -39,3 +39,20 @@ watch(
   () => reload(),
 );
 </script>
+
+<style scoped>
+.captcha-field {
+  gap: 0.75rem;
+}
+
+.captcha-button {
+  height: auto;
+  padding: 0.35rem;
+}
+
+.captcha-image {
+  display: block;
+  height: 72px;
+  width: 216px;
+}
+</style>

@@ -99,6 +99,11 @@ body {
   padding-bottom: 1rem;
 }
 
+.resource-share-option {
+  display: block;
+  margin-bottom: 0.35rem;
+}
+
 .resource-tree {
   display: grid;
   gap: 0.25rem;

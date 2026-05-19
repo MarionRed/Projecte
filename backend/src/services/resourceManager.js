@@ -43,6 +43,26 @@ function decodeResourceContent(data, resourcePath) {
   return Buffer.from(data.content || "", "utf8");
 }
 
+async function validateSharedGroups(actor, sharedGroupIds) {
+  const uniqueGroupIds = [...new Set(sharedGroupIds || [])];
+  if (uniqueGroupIds.length === 0) return [];
+
+  if (canManageCatalog(actor)) {
+    throw httpError("La seleccion de grupos al crear recursos solo esta disponible para usuarios", 403);
+  }
+
+  const user = await User.findByPk(actor.id, {
+    include: [{ model: Group, attributes: ["id"], through: { attributes: [] } }],
+  });
+  const membershipIds = new Set((user?.Groups || []).map((group) => group.id));
+  const invalidGroupId = uniqueGroupIds.find((groupId) => !membershipIds.has(groupId));
+  if (invalidGroupId) {
+    throw httpError("Solo puedes compartir con grupos a los que perteneces", 403);
+  }
+
+  return uniqueGroupIds;
+}
+
 function parentPathOf(resourcePath) {
   const cleanPath = toResourcePath(resourcePath);
   if (cleanPath === "/") return null;
@@ -250,12 +270,13 @@ async function createResourceWithRollback(data, actor) {
     throw httpError("Ya existe un recurso en esa ruta", 409);
   }
 
+  const sharedGroupIds = await validateSharedGroups(actor, data.sharedGroupIds);
   await createDiskResource(resourcePath, kind, decodeResourceContent(data, resourcePath));
 
   try {
     const metadata = await metadataForPath(resourcePath);
     return await sequelize.transaction(async (transaction) => {
-      return Resource.create(
+      const resource = await Resource.create(
         {
           name,
           path: resourcePath,
@@ -263,12 +284,27 @@ async function createResourceWithRollback(data, actor) {
           parentId: parent?.id || null,
           ownerUserId: canManageCatalog(actor) ? data.ownerUserId || actor.id : actor.id,
           ownerGroupId: canManageCatalog(actor) ? data.ownerGroupId || null : null,
-          isPrivate: !canManageCatalog(actor) && kind === "file",
+          isPrivate: !canManageCatalog(actor) && kind === "file" && sharedGroupIds.length === 0,
           fileType: kind === "file" ? inferFileType(name, data.fileType) : null,
           checksum: metadata.checksum,
         },
         { transaction },
       );
+
+      for (const groupId of sharedGroupIds) {
+        await Permission.create(
+          {
+            identityType: "group",
+            identityId: groupId,
+            resourceId: resource.id,
+            canRead: true,
+            canWrite: true,
+          },
+          { transaction },
+        );
+      }
+
+      return resource;
     });
   } catch (err) {
     await removeDiskResource(resourcePath).catch(() => {});
