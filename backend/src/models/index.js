@@ -5,6 +5,10 @@ const { createDiskResource, pathExists, resolveResourcePath } = require("../serv
 
 const User = sequelize.define("User", {
   username: { type: DataTypes.STRING, allowNull: false, unique: true },
+  email: { type: DataTypes.STRING, allowNull: true, unique: true },
+  emailVerified: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+  emailVerificationTokenHash: { type: DataTypes.STRING, allowNull: true },
+  emailVerificationExpiresAt: { type: DataTypes.DATE, allowNull: true },
   passwordHash: { type: DataTypes.STRING, allowNull: false },
   role: {
     type: DataTypes.ENUM("user", "security", "admin"),
@@ -24,6 +28,9 @@ const User = sequelize.define("User", {
     defaultValue: 0,
   },
   blockUntil: { type: DataTypes.DATE, allowNull: true },
+  lastLoginAt: { type: DataTypes.DATE, allowNull: true },
+  passwordResetTokenHash: { type: DataTypes.STRING, allowNull: true },
+  passwordResetExpiresAt: { type: DataTypes.DATE, allowNull: true },
   passwordResetRequired: {
     type: DataTypes.BOOLEAN,
     allowNull: false,
@@ -47,6 +54,11 @@ const Resource = sequelize.define("Resource", {
   fileType: { type: DataTypes.STRING, allowNull: true },
   checksum: { type: DataTypes.STRING, allowNull: true },
   isPrivate: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+  classification: {
+    type: DataTypes.ENUM("public", "internal", "confidential", "restricted"),
+    allowNull: false,
+    defaultValue: "internal",
+  },
 });
 
 const Permission = sequelize.define(
@@ -63,6 +75,7 @@ const Permission = sequelize.define(
       allowNull: false,
       defaultValue: false,
     },
+    expiresAt: { type: DataTypes.DATE, allowNull: true },
   },
   {
     indexes: [
@@ -79,6 +92,47 @@ const Log = sequelize.define("Log", {
   action: { type: DataTypes.STRING, allowNull: false },
   status: { type: DataTypes.STRING, allowNull: false },
   details: { type: DataTypes.TEXT, allowNull: true },
+});
+
+const SessionHistory = sequelize.define("SessionHistory", {
+  tokenId: { type: DataTypes.STRING, allowNull: true },
+  ip: { type: DataTypes.STRING, allowNull: true },
+  ipType: { type: DataTypes.STRING, allowNull: true },
+  country: { type: DataTypes.STRING, allowNull: true },
+  city: { type: DataTypes.STRING, allowNull: true },
+  geoLabel: { type: DataTypes.STRING, allowNull: true },
+  userAgent: { type: DataTypes.TEXT, allowNull: true },
+  userAgentLabel: { type: DataTypes.STRING, allowNull: true },
+  suspicious: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+  suspiciousReason: { type: DataTypes.TEXT, allowNull: true },
+  riskScore: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
+  revokedAt: { type: DataTypes.DATE, allowNull: true },
+});
+
+const AccessRequest = sequelize.define("AccessRequest", {
+  action: {
+    type: DataTypes.ENUM("read", "write"),
+    allowNull: false,
+  },
+  reason: { type: DataTypes.TEXT, allowNull: true },
+  status: {
+    type: DataTypes.ENUM("pending", "approved", "rejected"),
+    allowNull: false,
+    defaultValue: "pending",
+  },
+  decidedAt: { type: DataTypes.DATE, allowNull: true },
+});
+
+const SecuritySetting = sequelize.define("SecuritySetting", {
+  key: { type: DataTypes.STRING, allowNull: false, unique: true },
+  value: { type: DataTypes.TEXT, allowNull: false },
+});
+
+const UserTask = sequelize.define("UserTask", {
+  text: { type: DataTypes.STRING, allowNull: false },
+  dueDate: { type: DataTypes.DATEONLY, allowNull: true },
+  completed: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+  completedAt: { type: DataTypes.DATE, allowNull: true },
 });
 
 const UserGroup = sequelize.define("UserGroup", {}, { timestamps: false });
@@ -100,6 +154,19 @@ Resource.belongsTo(Resource, { as: "parent", foreignKey: "parentId" });
 
 Resource.hasMany(Permission, { foreignKey: "resourceId", onDelete: "CASCADE" });
 Permission.belongsTo(Resource, { foreignKey: "resourceId" });
+
+User.hasMany(SessionHistory, { foreignKey: "userId", onDelete: "CASCADE" });
+SessionHistory.belongsTo(User, { foreignKey: "userId" });
+
+User.hasMany(AccessRequest, { foreignKey: "userId", onDelete: "CASCADE" });
+AccessRequest.belongsTo(User, { foreignKey: "userId" });
+User.hasMany(AccessRequest, { as: "decisions", foreignKey: "decidedByUserId" });
+AccessRequest.belongsTo(User, { as: "decidedBy", foreignKey: "decidedByUserId" });
+Resource.hasMany(AccessRequest, { foreignKey: "resourceId", onDelete: "CASCADE" });
+AccessRequest.belongsTo(Resource, { foreignKey: "resourceId" });
+
+User.hasMany(UserTask, { foreignKey: "userId", onDelete: "CASCADE" });
+UserTask.belongsTo(User, { foreignKey: "userId" });
 
 async function logEvent(actor, action, status, details = null) {
   await Log.create({ actor, action, status, details });
@@ -124,14 +191,101 @@ async function ensureSchema() {
       defaultValue: false,
     });
   }
+  if (!resourcesTable.classification) {
+    await queryInterface.addColumn("Resources", "classification", {
+      type: DataTypes.ENUM("public", "internal", "confidential", "restricted"),
+      allowNull: false,
+      defaultValue: "internal",
+    });
+  }
 
   const usersTable = await queryInterface.describeTable("Users");
+  if (!usersTable.email) {
+    await queryInterface.addColumn("Users", "email", {
+      type: DataTypes.STRING,
+      allowNull: true,
+    });
+  }
+  if (!usersTable.emailVerified) {
+    await queryInterface.addColumn("Users", "emailVerified", {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+    });
+  }
+  if (!usersTable.emailVerificationTokenHash) {
+    await queryInterface.addColumn("Users", "emailVerificationTokenHash", {
+      type: DataTypes.STRING,
+      allowNull: true,
+    });
+  }
+  if (!usersTable.emailVerificationExpiresAt) {
+    await queryInterface.addColumn("Users", "emailVerificationExpiresAt", {
+      type: DataTypes.DATE,
+      allowNull: true,
+    });
+  }
+  if (!usersTable.lastLoginAt) {
+    await queryInterface.addColumn("Users", "lastLoginAt", {
+      type: DataTypes.DATE,
+      allowNull: true,
+    });
+  }
+  if (!usersTable.passwordResetTokenHash) {
+    await queryInterface.addColumn("Users", "passwordResetTokenHash", {
+      type: DataTypes.STRING,
+      allowNull: true,
+    });
+  }
+  if (!usersTable.passwordResetExpiresAt) {
+    await queryInterface.addColumn("Users", "passwordResetExpiresAt", {
+      type: DataTypes.DATE,
+      allowNull: true,
+    });
+  }
   if (!usersTable.passwordResetRequired) {
     await queryInterface.addColumn("Users", "passwordResetRequired", {
       type: DataTypes.BOOLEAN,
       allowNull: false,
       defaultValue: false,
     });
+  }
+
+  const permissionsTable = await queryInterface.describeTable("Permissions");
+  if (!permissionsTable.expiresAt) {
+    await queryInterface.addColumn("Permissions", "expiresAt", {
+      type: DataTypes.DATE,
+      allowNull: true,
+    });
+  }
+
+  const sessionsTable = await queryInterface.describeTable("SessionHistories");
+  if (!sessionsTable.tokenId) {
+    await queryInterface.addColumn("SessionHistories", "tokenId", {
+      type: DataTypes.STRING,
+      allowNull: true,
+    });
+  }
+  if (!sessionsTable.revokedAt) {
+    await queryInterface.addColumn("SessionHistories", "revokedAt", {
+      type: DataTypes.DATE,
+      allowNull: true,
+    });
+  }
+  const sessionColumns = {
+    ipType: { type: DataTypes.STRING, allowNull: true },
+    country: { type: DataTypes.STRING, allowNull: true },
+    city: { type: DataTypes.STRING, allowNull: true },
+    geoLabel: { type: DataTypes.STRING, allowNull: true },
+    userAgentLabel: { type: DataTypes.STRING, allowNull: true },
+    suspicious: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+    suspiciousReason: { type: DataTypes.TEXT, allowNull: true },
+    riskScore: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
+  };
+  for (const [column, definition] of Object.entries(sessionColumns)) {
+    if (!sessionsTable[column]) {
+      await queryInterface.addColumn("SessionHistories", column, definition);
+    }
   }
 }
 
@@ -144,6 +298,8 @@ async function seedDemoData() {
     defaults: {
       passwordHash: adminPassword,
       role: "admin",
+      email: "admin@example.local",
+      emailVerified: true,
       twoFactorSecret: "JBSWY3DPEHPK3PXP",
       twoFactorEnabled: false,
     },
@@ -154,10 +310,19 @@ async function seedDemoData() {
     defaults: {
       passwordHash: userPassword,
       role: "user",
+      email: "alice@example.local",
+      emailVerified: true,
       twoFactorSecret: "JBSWY3DPEHPK3PXP",
       twoFactorEnabled: false,
     },
   });
+
+  if (admin.email && !admin.emailVerified) {
+    await admin.update({ emailVerified: true });
+  }
+  if (alice.email && !alice.emailVerified) {
+    await alice.update({ emailVerified: true });
+  }
 
   const [profesores] = await Group.findOrCreate({
     where: { name: "profesores" },
@@ -195,6 +360,7 @@ async function seedDemoData() {
       kind: "directory",
       parentId: root.id,
       ownerUserId: admin.id,
+      classification: "internal",
     },
   });
   const [tema1] = await Resource.findOrCreate({
@@ -206,6 +372,7 @@ async function seedDemoData() {
       checksum: "demo-checksum-001",
       parentId: apuntes.id,
       ownerUserId: admin.id,
+      classification: "public",
     },
   });
 
@@ -234,7 +401,11 @@ module.exports = {
   Resource,
   Permission,
   Log,
+  AccessRequest,
+  SecuritySetting,
+  UserTask,
   UserGroup,
+  SessionHistory,
   ensureSchema,
   logEvent,
   seedDemoData,

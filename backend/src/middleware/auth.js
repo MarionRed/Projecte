@@ -1,5 +1,5 @@
 const jwt = require("jsonwebtoken");
-const { User, logEvent } = require("../models");
+const { SessionHistory, User, logEvent } = require("../models");
 
 const jwtSecret = process.env.JWT_SECRET || "iam_clase_secret";
 
@@ -16,6 +16,14 @@ async function authenticate(req, res, next) {
 
     if (!user || !user.isActive) {
       return res.status(401).json({ message: "Usuario no valido" });
+    }
+
+    if (payload.sessionId && payload.sessionToken) {
+      const session = await SessionHistory.findByPk(payload.sessionId);
+      if (!session || session.tokenId !== payload.sessionToken || session.revokedAt) {
+        return res.status(401).json({ message: "Sesion revocada" });
+      }
+      req.sessionRecord = session;
     }
 
     req.user = user;

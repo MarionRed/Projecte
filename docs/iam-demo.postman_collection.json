@@ -1,0 +1,80 @@
+{
+  "info": {
+    "name": "IAM Demo API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Coleccion Postman para probar la demo IAM/SOC. El login guarda cookie HTTPOnly automaticamente si Postman tiene cookie jar activo."
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3001/api" }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "request": { "method": "GET", "url": "{{baseUrl}}/health" }
+    },
+    {
+      "name": "Auth - Captcha SVG",
+      "request": { "method": "GET", "url": "{{baseUrl}}/auth/captcha" }
+    },
+    {
+      "name": "Auth - Login",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"username\": \"admin\",\n  \"password\": \"Admin123!\",\n  \"twoFactorCode\": \"\",\n  \"captcha\": \"\"\n}"
+        },
+        "url": "{{baseUrl}}/auth/login"
+      }
+    },
+    {
+      "name": "Auth - Profile",
+      "request": { "method": "GET", "url": "{{baseUrl}}/auth/profile" }
+    },
+    {
+      "name": "Users - List",
+      "request": { "method": "GET", "url": "{{baseUrl}}/users" }
+    },
+    {
+      "name": "Groups - List",
+      "request": { "method": "GET", "url": "{{baseUrl}}/groups" }
+    },
+    {
+      "name": "Resources - List",
+      "request": { "method": "GET", "url": "{{baseUrl}}/resources" }
+    },
+    {
+      "name": "Logs - Filtered",
+      "request": { "method": "GET", "url": "{{baseUrl}}/logs?action=LOGIN&search=suspicious" }
+    },
+    {
+      "name": "Logs - Export CSV",
+      "request": { "method": "GET", "url": "{{baseUrl}}/logs/export.csv" }
+    },
+    {
+      "name": "Sessions - With IP Intel",
+      "request": { "method": "GET", "url": "{{baseUrl}}/sessions" }
+    },
+    {
+      "name": "SOC - Metrics",
+      "request": { "method": "GET", "url": "{{baseUrl}}/security-center/metrics" }
+    },
+    {
+      "name": "SOC - Simulate Path Traversal",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"attackType\": \"path_traversal\",\n  \"target\": \"../../.env\"\n}"
+        },
+        "url": "{{baseUrl}}/security-center/simulate-attack"
+      }
+    },
+    {
+      "name": "Docs - OpenAPI",
+      "request": { "method": "GET", "url": "{{baseUrl}}/docs/openapi.json" }
+    }
+  ]
+}

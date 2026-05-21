@@ -78,7 +78,7 @@ router.post("/", validate(permissionSchema), asyncRoute(async (req, res) => {
     },
     defaults: data,
   });
-  await permission.update({ canRead: data.canRead, canWrite: data.canWrite });
+  await permission.update({ canRead: data.canRead, canWrite: data.canWrite, expiresAt: data.expiresAt || null });
   await logEvent(req.user.username, "UPSERT_PERMISSION", "SUCCESS", JSON.stringify(data));
   return res.status(201).json({ permission });
 }));

@@ -17,9 +17,14 @@ export const useAuthStore = defineStore("auth", {
     },
     async login(payload) {
       const { data } = await http.post("/auth/login", payload);
-      if (!data.passwordResetRequired) {
+      if (!data.passwordResetRequired && !data.mfaRequired) {
         this.user = data.user;
       }
+      return data;
+    },
+    async verifyMfa(payload) {
+      const { data } = await http.post("/auth/verify-mfa", payload);
+      this.user = data.user;
       return data;
     },
     async logout() {

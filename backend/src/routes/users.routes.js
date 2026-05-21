@@ -18,7 +18,7 @@ function isProtectedAdmin(user) {
 router.get("/", asyncRoute(async (req, res) => {
   if (req.user.role === "security") {
     const users = await User.findAll({
-      attributes: ["id", "username", "role", "isActive", "failedAttempts", "blockUntil", "passwordResetRequired"],
+      attributes: ["id", "username", "email", "role", "isActive", "failedAttempts", "blockUntil", "passwordResetRequired", "lastLoginAt", "twoFactorEnabled"],
       where: { role: "user" },
       order: [["id", "ASC"]],
     });
@@ -35,7 +35,7 @@ router.get("/", asyncRoute(async (req, res) => {
   }
 
   const users = await User.findAll({
-    attributes: ["id", "username", "role", "isActive", "failedAttempts", "blockUntil", "passwordResetRequired"],
+    attributes: ["id", "username", "email", "role", "isActive", "failedAttempts", "blockUntil", "passwordResetRequired", "lastLoginAt", "twoFactorEnabled"],
     include: [{ model: Group, attributes: ["id", "name"], through: { attributes: [] } }],
     order: [["id", "ASC"]],
   });
@@ -69,7 +69,11 @@ router.patch("/:id", requireRole(["admin"]), validate(userUpdateSchema), asyncRo
     return res.status(403).json({ message: "La cuenta administradora no se puede modificar" });
   }
 
+  const previousRole = user.role;
   await user.update(req.validated.body);
+  if (req.validated.body.role && req.validated.body.role !== previousRole) {
+    await logEvent(req.user.username, "ROLE_CHANGE", "SUCCESS", `${user.username}: ${previousRole} -> ${req.validated.body.role}`);
+  }
   await logEvent(req.user.username, `UPDATE_USER_${user.id}`, "SUCCESS", JSON.stringify(req.validated.body));
   return res.json({ user });
 }));

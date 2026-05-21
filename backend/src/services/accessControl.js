@@ -2,6 +2,9 @@ const { Group, Permission, Resource, User } = require("../models");
 
 function permissionAllows(permission, action) {
   if (!permission) return false;
+  if (permission.expiresAt && new Date(permission.expiresAt).getTime() <= Date.now()) {
+    return false;
+  }
   if (action === "read") return permission.canRead || permission.canWrite;
   return permission.canWrite;
 }
@@ -26,6 +29,10 @@ async function explainAccess(userId, resourceId, action) {
     return { allowed: true, reason: "El rol admin tiene acceso completo" };
   }
 
+  if (resource.classification === "restricted" && action === "write") {
+    return { allowed: false, reason: "El recurso esta clasificado como restringido y bloquea escritura no administrativa" };
+  }
+
   if (resource.isPrivate && resource.ownerUserId !== user.id) {
     return { allowed: false, reason: "El recurso es privado del propietario" };
   }
@@ -34,10 +41,27 @@ async function explainAccess(userId, resourceId, action) {
     return { allowed: true, reason: "El usuario es propietario del recurso" };
   }
 
+  const directPermission = await Permission.findOne({
+    where: { identityType: "user", identityId: user.id, resourceId: resource.id },
+  });
+  if (directPermission) {
+    if (directPermission.expiresAt && new Date(directPermission.expiresAt).getTime() <= Date.now()) {
+      return { allowed: false, reason: "El permiso directo del usuario ha expirado" };
+    }
+    if (permissionAllows(directPermission, action)) {
+      return { allowed: true, reason: `Permiso directo del usuario para ${action} en ${resource.path}` };
+    }
+  }
+
   const groupIds = user.Groups.map((group) => group.id);
   const groupPermissions = await Permission.findAll({
     where: { identityType: "group", identityId: groupIds, resourceId: resource.id },
   });
+  const expiredPermission = groupPermissions.find((permission) => permission.expiresAt && new Date(permission.expiresAt).getTime() <= Date.now());
+  if (expiredPermission) {
+    const group = user.Groups.find((item) => item.id === expiredPermission.identityId);
+    return { allowed: false, reason: `El permiso del grupo ${group?.name || expiredPermission.identityId} ha expirado` };
+  }
   const groupPermission = groupPermissions.find((permission) => permissionAllows(permission, action));
 
   if (groupPermission) {

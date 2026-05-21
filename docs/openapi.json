@@ -1,0 +1,186 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "IAM Demo API",
+    "version": "2.0.0",
+    "description": "API REST documentada para la demo IAM/SOC educativa."
+  },
+  "servers": [
+    { "url": "http://localhost:3001/api" }
+  ],
+  "components": {
+    "securitySchemes": {
+      "cookieAuth": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "token"
+      }
+    },
+    "schemas": {
+      "LoginRequest": {
+        "type": "object",
+        "required": ["username", "password"],
+        "properties": {
+          "username": { "type": "string", "example": "admin" },
+          "password": { "type": "string", "example": "Admin123!" },
+          "twoFactorCode": { "type": "string" },
+          "captcha": { "type": "string" }
+        }
+      },
+      "RegisterRequest": {
+        "type": "object",
+        "required": ["username", "password"],
+        "properties": {
+          "username": { "type": "string" },
+          "email": { "type": "string" },
+          "password": { "type": "string" },
+          "captcha": { "type": "string" }
+        }
+      },
+      "AttackSimulationRequest": {
+        "type": "object",
+        "properties": {
+          "attackType": {
+            "type": "string",
+            "enum": ["path_traversal", "brute_force", "permission_probe", "token_tamper"]
+          },
+          "target": { "type": "string", "example": "../../.env" }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "summary": "Health check",
+        "responses": { "200": { "description": "OK" } }
+      }
+    },
+    "/auth/captcha": {
+      "get": {
+        "summary": "Obtiene CAPTCHA SVG",
+        "responses": { "200": { "description": "Imagen SVG CAPTCHA" } }
+      }
+    },
+    "/auth/login": {
+      "post": {
+        "summary": "Inicia sesion y crea cookie HTTPOnly",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/LoginRequest" } } }
+        },
+        "responses": {
+          "200": { "description": "Login correcto" },
+          "401": { "description": "Credenciales, 2FA o token no validos" },
+          "403": { "description": "Cuenta desactivada o bloqueada" }
+        }
+      }
+    },
+    "/auth/register": {
+      "post": {
+        "summary": "Registra usuario con Argon2 y politica de contrasena",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RegisterRequest" } } }
+        },
+        "responses": { "201": { "description": "Usuario creado" }, "400": { "description": "Datos no validos" } }
+      }
+    },
+    "/auth/forgot-password": {
+      "post": {
+        "summary": "Solicita recuperacion de contrasena",
+        "responses": { "200": { "description": "Solicitud aceptada sin revelar si el usuario existe" } }
+      }
+    },
+    "/auth/profile": {
+      "get": {
+        "summary": "Perfil del usuario autenticado",
+        "security": [{ "cookieAuth": [] }],
+        "responses": { "200": { "description": "Perfil" }, "401": { "description": "No autenticado" } }
+      }
+    },
+    "/users": {
+      "get": {
+        "summary": "Lista usuarios segun rol",
+        "security": [{ "cookieAuth": [] }],
+        "responses": { "200": { "description": "Usuarios" } }
+      }
+    },
+    "/groups": {
+      "get": {
+        "summary": "Lista grupos visibles",
+        "security": [{ "cookieAuth": [] }],
+        "responses": { "200": { "description": "Grupos" } }
+      },
+      "post": {
+        "summary": "Crea grupo",
+        "security": [{ "cookieAuth": [] }],
+        "responses": { "201": { "description": "Grupo creado" } }
+      }
+    },
+    "/resources": {
+      "get": {
+        "summary": "Lista arbol de recursos",
+        "security": [{ "cookieAuth": [] }],
+        "responses": { "200": { "description": "Recursos" } }
+      },
+      "post": {
+        "summary": "Crea recurso clasificado",
+        "security": [{ "cookieAuth": [] }],
+        "responses": { "201": { "description": "Recurso creado" } }
+      }
+    },
+    "/permissions/check": {
+      "post": {
+        "summary": "Simula decision IAM de lectura/escritura",
+        "security": [{ "cookieAuth": [] }],
+        "responses": { "200": { "description": "Decision permitida/denegada con motivo" } }
+      }
+    },
+    "/logs": {
+      "get": {
+        "summary": "Logs con filtros",
+        "security": [{ "cookieAuth": [] }],
+        "parameters": [
+          { "name": "user", "in": "query", "schema": { "type": "string" } },
+          { "name": "action", "in": "query", "schema": { "type": "string" } },
+          { "name": "status", "in": "query", "schema": { "type": "string" } },
+          { "name": "date", "in": "query", "schema": { "type": "string" } },
+          { "name": "search", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": { "200": { "description": "Logs" } }
+      }
+    },
+    "/logs/export.csv": {
+      "get": {
+        "summary": "Exporta logs CSV para admin/security",
+        "security": [{ "cookieAuth": [] }],
+        "responses": { "200": { "description": "CSV" } }
+      }
+    },
+    "/sessions": {
+      "get": {
+        "summary": "Historial de sesiones con IP y geolocalizacion aproximada",
+        "security": [{ "cookieAuth": [] }],
+        "responses": { "200": { "description": "Sesiones" } }
+      }
+    },
+    "/security-center/metrics": {
+      "get": {
+        "summary": "Metricas internas SOC protegidas",
+        "security": [{ "cookieAuth": [] }],
+        "responses": { "200": { "description": "Metricas SOC" } }
+      }
+    },
+    "/security-center/simulate-attack": {
+      "post": {
+        "summary": "Simula visualmente un ataque bloqueado",
+        "security": [{ "cookieAuth": [] }],
+        "requestBody": {
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AttackSimulationRequest" } } }
+        },
+        "responses": { "200": { "description": "Ataque simulado y registrado en logs" } }
+      }
+    }
+  }
+}

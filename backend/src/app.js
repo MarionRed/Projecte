@@ -14,6 +14,11 @@ const resourceRoutes = require("./routes/resources.routes");
 const permissionRoutes = require("./routes/permissions.routes");
 const logRoutes = require("./routes/logs.routes");
 const appResourceRoutes = require("./routes/appResources.routes");
+const sessionRoutes = require("./routes/sessions.routes");
+const accessRequestRoutes = require("./routes/accessRequests.routes");
+const securityCenterRoutes = require("./routes/securityCenter.routes");
+const docsRoutes = require("./routes/docs.routes");
+const taskRoutes = require("./routes/tasks.routes");
 
 const app = express();
 
@@ -43,6 +48,11 @@ app.use("/api/resources", resourceRoutes);
 app.use("/api/app/resources", appResourceRoutes);
 app.use("/api/permissions", permissionRoutes);
 app.use("/api/logs", logRoutes);
+app.use("/api/sessions", sessionRoutes);
+app.use("/api/access-requests", accessRequestRoutes);
+app.use("/api/security-center", securityCenterRoutes);
+app.use("/api/docs", docsRoutes);
+app.use("/api/tasks", taskRoutes);
 
 const frontendDistPath = path.resolve(__dirname, "../../frontend/dist");
 

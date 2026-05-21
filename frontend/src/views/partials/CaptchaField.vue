@@ -1,14 +1,24 @@
 <template>
-  <div class="field">
-    <label class="label">Captcha</label>
-    <div class="is-flex is-align-items-center captcha-field">
-      <button type="button" class="button is-light captcha-button" @click="reload">
+  <div class="captcha-challenge">
+    <div class="captcha-stage">
+      <div class="captcha-header">
+        <p>Security Challenge</p>
+        <span>Prove you are human</span>
+      </div>
+      <button type="button" class="captcha-refresh" aria-label="Regenerar CAPTCHA" @click="reload">
+        R
+      </button>
+      <button type="button" class="captcha-image-shell" @click="reload">
         <img :src="captchaUrl" alt="Captcha" class="captcha-image" />
       </button>
+    </div>
+
+    <div class="input-shell captcha-code-shell">
+      <span class="field-icon icon-shield"></span>
       <input
         :value="modelValue"
-        class="input"
-        placeholder="Texto del captcha"
+        class="input captcha-input"
+        placeholder="Introduce el codigo"
         required
         @input="$emit('update:modelValue', $event.target.value)"
       />
@@ -39,20 +49,3 @@ watch(
   () => reload(),
 );
 </script>
-
-<style scoped>
-.captcha-field {
-  gap: 0.75rem;
-}
-
-.captcha-button {
-  height: auto;
-  padding: 0.35rem;
-}
-
-.captcha-image {
-  display: block;
-  height: 72px;
-  width: 216px;
-}
-</style>

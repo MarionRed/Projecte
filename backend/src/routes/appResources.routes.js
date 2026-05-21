@@ -38,6 +38,9 @@ function parseFilename(req) {
   if (!result.success) {
     throw Object.assign(new Error("Nombre de archivo no valido"), { statusCode: 400 });
   }
+  if (isTraversalAttempt(result.data)) {
+    throw Object.assign(new Error("Intento de path traversal bloqueado"), { statusCode: 400, securityEvent: true });
+  }
 
   return result.data;
 }
@@ -47,8 +50,23 @@ function parseBodyFilename(req) {
   if (!result.success) {
     throw Object.assign(new Error("Nombre de archivo no valido"), { statusCode: 400 });
   }
+  if (isTraversalAttempt(result.data)) {
+    throw Object.assign(new Error("Intento de path traversal bloqueado"), { statusCode: 400, securityEvent: true });
+  }
 
   return result.data;
+}
+
+function isTraversalAttempt(filename) {
+  return (
+    filename.includes("../") ||
+    filename.includes("..\\") ||
+    filename.includes("/") ||
+    filename.includes("\\") ||
+    filename === "." ||
+    filename === ".." ||
+    /^[A-Za-z]:/.test(filename)
+  );
 }
 
 function parseContent(req) {
@@ -93,6 +111,9 @@ router.get("/:filename", async (req, res, next) => {
     await logEvent(req.user.username, "RESOURCE_READ", "SUCCESS", filename);
     return res.json({ filename, content });
   } catch (err) {
+    if (err.securityEvent) {
+      await logEvent(req.user.username, "PATH_TRAVERSAL", "DENIED", req.params.filename);
+    }
     if (filename) {
       await logEvent(req.user.username, "RESOURCE_READ", "FAILED", filename);
     }
@@ -115,6 +136,9 @@ router.post("/", async (req, res, next) => {
     await logEvent(req.user.username, "RESOURCE_CREATE", "SUCCESS", parsedFilename);
     return res.status(201).json({ message: "Archivo creado" });
   } catch (err) {
+    if (err.securityEvent) {
+      await logEvent(req.user.username, "PATH_TRAVERSAL", "DENIED", filename || "");
+    }
     await logEvent(req.user.username, "RESOURCE_CREATE", "FAILED", filename || "");
     return next(err);
   }
@@ -135,6 +159,9 @@ router.put("/:filename", async (req, res, next) => {
     await logEvent(req.user.username, "RESOURCE_UPDATE", "SUCCESS", filename);
     return res.json({ message: "Archivo actualizado" });
   } catch (err) {
+    if (err.securityEvent) {
+      await logEvent(req.user.username, "PATH_TRAVERSAL", "DENIED", req.params.filename);
+    }
     if (filename) {
       await logEvent(req.user.username, "RESOURCE_UPDATE", "FAILED", filename);
     }
@@ -156,6 +183,9 @@ router.delete("/:filename", async (req, res, next) => {
     await logEvent(req.user.username, "RESOURCE_DELETE", "SUCCESS", filename);
     return res.status(204).send();
   } catch (err) {
+    if (err.securityEvent) {
+      await logEvent(req.user.username, "PATH_TRAVERSAL", "DENIED", req.params.filename);
+    }
     if (filename) {
       await logEvent(req.user.username, "RESOURCE_DELETE", "FAILED", filename);
     }

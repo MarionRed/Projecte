@@ -43,6 +43,10 @@ function decodeResourceContent(data, resourcePath) {
   return Buffer.from(data.content || "", "utf8");
 }
 
+function permissionIsActive(permission) {
+  return !permission.expiresAt || new Date(permission.expiresAt).getTime() > Date.now();
+}
+
 async function validateSharedGroups(actor, sharedGroupIds) {
   const uniqueGroupIds = [...new Set(sharedGroupIds || [])];
   if (uniqueGroupIds.length === 0) return [];
@@ -101,6 +105,7 @@ function buildTree(resources) {
     fileType: resource.fileType,
     checksum: resource.checksum,
     isPrivate: resource.isPrivate,
+    classification: resource.classification,
     ownerUser: resource.ownerUser,
     ownerGroup: resource.ownerGroup,
     Permissions: resource.Permissions || [],
@@ -153,7 +158,11 @@ async function filterResourcesForActor(resources, actor) {
     return (resource.Permissions || []).some((permission) => {
       const grantsAccess = permission.canRead || permission.canWrite;
       if (!grantsAccess) return false;
-      return permission.identityType === "group" && groupIds.has(permission.identityId);
+      if (!permissionIsActive(permission)) return false;
+      return (
+        (permission.identityType === "group" && groupIds.has(permission.identityId)) ||
+        (permission.identityType === "user" && permission.identityId === actor.id)
+      );
     });
   });
 }
@@ -195,6 +204,7 @@ async function listResourceTree(actor = null) {
         fileType: item.kind === "file" ? inferFileType(item.name) : null,
         checksum: item.checksum,
         isPrivate: false,
+        classification: "internal",
         Permissions: [],
         access: { canRead: true, canWrite: true, isOwner: false },
         disk: { ...item, exists: true, persisted: false },
@@ -285,6 +295,7 @@ async function createResourceWithRollback(data, actor) {
           ownerUserId: canManageCatalog(actor) ? data.ownerUserId || actor.id : actor.id,
           ownerGroupId: canManageCatalog(actor) ? data.ownerGroupId || null : null,
           isPrivate: !canManageCatalog(actor) && kind === "file" && sharedGroupIds.length === 0,
+          classification: data.classification,
           fileType: kind === "file" ? inferFileType(name, data.fileType) : null,
           checksum: metadata.checksum,
         },
